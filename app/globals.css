@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F7F6FF;
+  --foreground: #1A1523;
+  --sidebar: #0C0A1E;
+  --card: #ffffff;
+  --border: #E8E6F4;
+  --violet: #7C3AED;
+  --violet-light: #EDE9FE;
+  --muted: #6B7280;
+  --green: #10B981;
+  --yellow: #F59E0B;
+  --red: #EF4444;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-violet: var(--violet);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 999px;
+}
+
+/* iPhone safe areas */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Bottom nav sits above iPhone home indicator */
+nav.bottom-nav-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+  height: calc(4rem + env(safe-area-inset-bottom));
+}
+
+/* Ensure main content clears the mobile top bar + bottom nav */
+@media (max-width: 767px) {
+  .dashboard-main {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+}
