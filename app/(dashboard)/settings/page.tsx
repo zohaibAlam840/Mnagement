@@ -105,9 +105,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Danger zone */}
-      <button className="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-100 bg-red-50 rounded-xl hover:bg-red-100 transition-colors">
+      <Link href="/login" className="block w-full py-2.5 text-sm font-semibold text-red-500 border border-red-100 bg-red-50 rounded-xl hover:bg-red-100 transition-colors text-center">
         Sign out
-      </button>
+      </Link>
     </div>
   )
 }

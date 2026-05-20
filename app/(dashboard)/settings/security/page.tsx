@@ -223,12 +223,12 @@ export default function SecurityPage() {
         <p className="text-sm font-semibold text-red-800 mb-1">Danger zone</p>
         <p className="text-xs text-red-600 mb-4">These actions are permanent and cannot be undone.</p>
         <div className="space-y-2">
-          <button className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
+          <Link href="/login" className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
             <div className="flex items-center gap-2.5">
               <LogOut className="w-4 h-4 text-red-500" />
               <span className="text-sm font-semibold text-red-700">Sign out all devices</span>
             </div>
-          </button>
+          </Link>
           <button className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
             <span className="text-sm font-semibold text-red-700">Delete account</span>
           </button>

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "FieldLog — BACB Fieldwork Tracker",
     short_name: "FieldLog",
     description: "Track BACB fieldwork hours, compliance ratios, and supervisor approvals.",
-    start_url: "/trainee",
+    start_url: "/login",
     display: "standalone",
     orientation: "portrait",
     background_color: "#F7F6FF",

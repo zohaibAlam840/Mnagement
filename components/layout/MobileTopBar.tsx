@@ -62,6 +62,9 @@ export function MobileTopBar() {
   const title = getTitle(pathname)
   const backRoute = getBackRoute(pathname)
   const isDashboard = pathname === "/trainee" || pathname === "/supervisor"
+  const isTrainee = pathname.startsWith("/trainee")
+  const isSupervisor = pathname.startsWith("/supervisor")
+  const isRoleSection = isTrainee || isSupervisor
 
   return (
     <header className="md:hidden sticky top-0 z-30 bg-white border-b border-zinc-100 safe-top">
@@ -86,9 +89,32 @@ export function MobileTopBar() {
           <div className="w-7" />
         )}
 
-        {/* Center: page title */}
-        <div className={cn("flex-1 text-center", backRoute ? "pr-14" : isDashboard ? "pr-12" : "")}>
-          <span className="text-sm font-semibold text-zinc-900">{title}</span>
+        {/* Center: role toggle on trainee/supervisor pages, otherwise page title */}
+        <div className="flex-1 flex items-center justify-center">
+          {isRoleSection ? (
+            <div className="flex items-center bg-zinc-100 rounded-lg p-0.5">
+              <Link
+                href="/trainee"
+                className={cn(
+                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all",
+                  isTrainee ? "bg-white text-violet-700 shadow-sm" : "text-zinc-400"
+                )}
+              >
+                Trainee
+              </Link>
+              <Link
+                href="/supervisor"
+                className={cn(
+                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all",
+                  isSupervisor ? "bg-white text-violet-700 shadow-sm" : "text-zinc-400"
+                )}
+              >
+                Supervisor
+              </Link>
+            </div>
+          ) : (
+            <span className="text-sm font-semibold text-zinc-900">{title}</span>
+          )}
         </div>
 
         {/* Right: bell → notifications page */}

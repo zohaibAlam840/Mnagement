@@ -161,9 +161,9 @@ export function Sidebar() {
               {isSupervisor ? "BCBA-D · Supervisor" : "BCBA Trainee"}
             </p>
           </div>
-          <button className="text-zinc-600 hover:text-zinc-400 transition-colors">
+          <Link href="/login" className="text-zinc-600 hover:text-zinc-400 transition-colors">
             <LogOut className="w-3.5 h-3.5" />
-          </button>
+          </Link>
         </div>
       </div>
     </aside>
