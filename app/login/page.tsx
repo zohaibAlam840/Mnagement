@@ -39,7 +39,7 @@ export default function LoginPage() {
         .select("role")
         .eq("id", user.id)
         .single()
-      router.push(profile?.role === "supervisor" ? "/supervisor" : "/trainee")
+      window.location.href = profile?.role === "supervisor" ? "/supervisor" : "/trainee"
     }
   }
 
