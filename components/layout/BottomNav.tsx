@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -12,6 +13,7 @@ import {
   UserCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
 const traineeItems = [
   { label: "Home", icon: LayoutDashboard, href: "/trainee" },
@@ -32,10 +34,23 @@ const supervisorItems = [
 export function BottomNav() {
   const pathname = usePathname()
   const isSupervisor = pathname.startsWith("/supervisor")
-  const items = isSupervisor ? supervisorItems : traineeItems
+  const isTrainee = pathname.startsWith("/trainee")
+  const [userRole, setUserRole] = useState("")
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from("profiles").select("role").eq("id", user.id).single()
+        .then(({ data }) => { if (data) setUserRole(data.role) })
+    })
+  }, [])
+
+  const showSupervisorNav = isSupervisor || (!isTrainee && userRole === "supervisor")
+  const items = showSupervisorNav ? supervisorItems : traineeItems
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-zinc-100 bottom-nav-safe">
+    <nav className="md:hidden print:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-zinc-100 bottom-nav-safe">
       <div className="flex items-center h-16">
         {items.map((item) => {
           const active =

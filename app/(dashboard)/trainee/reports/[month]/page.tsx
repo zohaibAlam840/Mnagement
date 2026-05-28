@@ -1,26 +1,136 @@
+"use client"
+
+import { useState, useEffect, use } from "react"
 import Link from "next/link"
 import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature } from "lucide-react"
-import { monthlyReports } from "@/lib/mock-data"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import type { Database } from "@/lib/supabase/types"
 
-export default async function MonthlyReportDetail({ params }: { params: Promise<{ month: string }> }) {
-  const { month } = await params
-  const report = monthlyReports.find((r) => r.slug === month) ?? monthlyReports[0]
+type MonthlySummary = Database["public"]["Tables"]["monthly_summaries"]["Row"]
+type Profile = Database["public"]["Tables"]["profiles"]["Row"]
+
+function formatMonth(m: string) {
+  const [year, month] = m.split("-")
+  return new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+}
+
+export default function MonthlyReportDetail({ params }: { params: Promise<{ month: string }> }) {
+  const { month } = use(params)
+
+  const [summary, setSummary] = useState<MonthlySummary | null>(null)
+  const [supervisor, setSupervisor] = useState<Profile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+  const [traineeSigningInProgress, setTraineeSigningInProgress] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: sRaw } = await supabase
+        .from("monthly_summaries")
+        .select("*")
+        .eq("trainee_id", user.id)
+        .eq("month", month)
+        .single()
+      const s = sRaw as MonthlySummary | null
+
+      if (!s) { setNotFound(true); setLoading(false); return }
+      setSummary(s)
+
+      if (s.supervisor_id) {
+        const { data: supRaw } = await supabase.from("profiles").select("*").eq("id", s.supervisor_id).single()
+        if (supRaw) setSupervisor(supRaw as Profile)
+      }
+      setLoading(false)
+    }
+    load()
+  }, [month])
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-7 max-w-3xl mx-auto flex items-center justify-center min-h-[50vh]">
+        <div className="w-6 h-6 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (notFound || !summary) {
+    return (
+      <div className="p-4 md:p-7 max-w-2xl mx-auto text-center py-20">
+        <p className="text-zinc-400 mb-4">Report not found.</p>
+        <Link href="/trainee/reports" className="text-sm font-semibold text-violet-600 hover:text-violet-700">
+          ← Back to reports
+        </Link>
+      </div>
+    )
+  }
+
+  const handleDownloadPdf = () => {
+    const prevTitle = document.title
+    document.title = `BACB_Report_${month}`
+    window.print()
+    setTimeout(() => { document.title = prevTitle }, 1000)
+  }
+
+  const handleTraineeSign = async () => {
+    if (!summary) return
+    setTraineeSigningInProgress(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from("monthly_summaries")
+      .update({ trainee_signed_at: new Date().toISOString() })
+      .eq("id", summary.id)
+    if (!error) {
+      setSummary({ ...summary, trainee_signed_at: new Date().toISOString() })
+    }
+    setTraineeSigningInProgress(false)
+  }
+
+  const supervisionH = summary.supervision_hours_individual + summary.supervision_hours_group
+  const restrictedPct = summary.total_hours > 0 ? (summary.restricted_hours / summary.total_hours) * 100 : 0
+  const supervisionPct = summary.total_hours > 0 ? (supervisionH / summary.total_hours) * 100 : 0
+  const minSupervision = summary.fieldwork_type === "concentrated"
+    ? (summary.requirements_year === "2022" ? 10 : 7.5)
+    : 5
+  const monthlyCapHours = summary.requirements_year === "2027" ? 160 : 130
+  const minMonthlyHours = 20
+
+  const restrictedOk = restrictedPct <= 50
+  const supervisionOk = supervisionPct >= minSupervision
+  const monthlyCapOk = summary.total_hours <= monthlyCapHours
+  const monthlyMinOk = summary.total_hours >= minMonthlyHours
+  const isCompliant = restrictedOk && supervisionOk && monthlyCapOk
+
+  const supervisorName = supervisor ? `${supervisor.first_name} ${supervisor.last_name}` : "Supervisor"
 
   return (
     <div className="p-4 md:p-7 max-w-3xl mx-auto">
-      {/* Back + header */}
-      <Link href="/trainee/reports" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          aside { display: none !important; }
+          header { display: none !important; }
+          nav { display: none !important; }
+          main.dashboard-main { padding-left: 0 !important; }
+          body { background: white !important; }
+          .print-hide { display: none !important; }
+          @page { margin: 1.5cm; }
+        }
+      ` }} />
+      <Link href="/trainee/reports" className="print-hide flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
         <ChevronLeft className="w-4 h-4" /> Reports
       </Link>
 
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-zinc-900">{report.month}</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-zinc-900">{formatMonth(month)}</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Monthly BACB Fieldwork Verification</p>
         </div>
         <div className="flex items-center gap-2">
-          {report.complianceStatus === "compliant"
+          {isCompliant
             ? <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-100"><CheckCircle2 className="w-3.5 h-3.5" /> Compliant</span>
             : <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-100"><AlertTriangle className="w-3.5 h-3.5" /> Warning</span>
           }
@@ -30,45 +140,47 @@ export default async function MonthlyReportDetail({ params }: { params: Promise<
       {/* Hours breakdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
-          { label: "Total Hours", value: report.totalHours, color: "text-zinc-900" },
-          { label: "Restricted", value: report.restrictedHours, color: "text-violet-600" },
-          { label: "Unrestricted", value: report.unrestrictedHours, color: "text-blue-600" },
-          { label: "Supervision", value: report.supervisionHours, color: "text-emerald-600" },
+          { label: "Total Hours", value: summary.total_hours, color: "text-zinc-900" },
+          { label: "Restricted", value: summary.restricted_hours, color: "text-violet-600" },
+          { label: "Unrestricted", value: summary.unrestricted_hours, color: "text-blue-600" },
+          { label: "Supervision", value: supervisionH, color: "text-emerald-600" },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-4">
-            <p className={cn("text-2xl font-bold", s.color)}>{s.value}h</p>
+            <p className={cn("text-2xl font-bold", s.color)}>{s.value.toFixed(1)}h</p>
             <p className="text-xs text-zinc-400 mt-0.5">{s.label}</p>
           </div>
         ))}
       </div>
 
       {/* Stacked bar */}
-      <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
-        <h3 className="text-sm font-semibold text-zinc-900 mb-3">Hours Breakdown</h3>
-        <div className="flex h-8 rounded-lg overflow-hidden gap-0.5 mb-3">
-          <div className="bg-violet-500 flex items-center justify-center" style={{ width: `${(report.restrictedHours / report.totalHours) * 100}%` }}>
-            <span className="text-[10px] font-bold text-white">{report.restrictedHours}h</span>
-          </div>
-          <div className="bg-blue-400 flex items-center justify-center" style={{ width: `${(report.unrestrictedHours / report.totalHours) * 100}%` }}>
-            <span className="text-[10px] font-bold text-white">{report.unrestrictedHours}h</span>
-          </div>
-          <div className="bg-emerald-400 flex items-center justify-center" style={{ width: `${(report.supervisionHours / report.totalHours) * 100}%` }}>
-            <span className="text-[10px] font-bold text-white">{report.supervisionHours}h</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 text-xs text-zinc-500">
-          {[
-            { color: "bg-violet-500", label: "Restricted" },
-            { color: "bg-blue-400", label: "Unrestricted" },
-            { color: "bg-emerald-400", label: "Supervision" },
-          ].map((l) => (
-            <div key={l.label} className="flex items-center gap-1.5">
-              <div className={cn("w-2.5 h-2.5 rounded-sm", l.color)} />
-              {l.label}
+      {summary.total_hours > 0 && (
+        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
+          <h3 className="text-sm font-semibold text-zinc-900 mb-3">Hours Breakdown</h3>
+          <div className="flex h-8 rounded-lg overflow-hidden gap-0.5 mb-3">
+            <div className="bg-violet-500 flex items-center justify-center" style={{ width: `${(summary.restricted_hours / summary.total_hours) * 100}%` }}>
+              {summary.restricted_hours > 0 && <span className="text-[10px] font-bold text-white">{summary.restricted_hours.toFixed(1)}h</span>}
             </div>
-          ))}
+            <div className="bg-blue-400 flex items-center justify-center" style={{ width: `${(summary.unrestricted_hours / summary.total_hours) * 100}%` }}>
+              {summary.unrestricted_hours > 0 && <span className="text-[10px] font-bold text-white">{summary.unrestricted_hours.toFixed(1)}h</span>}
+            </div>
+            <div className="bg-emerald-400 flex items-center justify-center" style={{ width: `${(supervisionH / summary.total_hours) * 100}%` }}>
+              {supervisionH > 0 && <span className="text-[10px] font-bold text-white">{supervisionH.toFixed(1)}h</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-zinc-500">
+            {[
+              { color: "bg-violet-500", label: "Restricted" },
+              { color: "bg-blue-400", label: "Unrestricted" },
+              { color: "bg-emerald-400", label: "Supervision" },
+            ].map((l) => (
+              <div key={l.label} className="flex items-center gap-1.5">
+                <div className={cn("w-2.5 h-2.5 rounded-sm", l.color)} />
+                {l.label}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Compliance checks */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
@@ -77,22 +189,34 @@ export default async function MonthlyReportDetail({ params }: { params: Promise<
           {[
             {
               label: "Restricted hours ≤ 50%",
-              value: `${report.restrictedPercent}%`,
-              pass: report.restrictedPercent <= 50,
-              detail: report.restrictedPercent <= 50 ? "Within limit" : "Exceeds limit",
+              value: `${restrictedPct.toFixed(1)}%`,
+              pass: restrictedOk,
+              detail: restrictedOk ? "Within limit" : "Exceeds 50% limit",
             },
             {
-              label: "Supervision ≥ 5% of total",
-              value: `${report.supervisionPercent}%`,
-              pass: report.supervisionPercent >= 5,
-              detail: report.supervisionPercent >= 5 ? "Above minimum" : "Below minimum",
+              label: `Supervision ≥ ${minSupervision}% of total`,
+              value: `${supervisionPct.toFixed(1)}%`,
+              pass: supervisionOk,
+              detail: supervisionOk ? "Above minimum" : `Below ${minSupervision}% minimum`,
             },
             {
-              label: "Minimum 4 hours this month",
-              value: `${report.totalHours}h`,
-              pass: report.totalHours >= 4,
-              detail: "Minimum met",
+              label: `Monthly hours ≥ ${minMonthlyHours}h and ≤ ${monthlyCapHours}h`,
+              value: `${summary.total_hours.toFixed(1)}h`,
+              pass: monthlyMinOk && monthlyCapOk,
+              detail: !monthlyMinOk ? `Below ${minMonthlyHours}h minimum` : !monthlyCapOk ? `Exceeds ${monthlyCapHours}h cap` : "Within range",
             },
+            ...(summary.observations_count > 0 || summary.requirements_year !== "2022" ? [{
+              label: summary.requirements_year === "2022"
+                ? "Client observations (≥ 1/month)"
+                : `Client observation duration (≥ ${summary.fieldwork_type === "concentrated" ? 90 : 60} min/month)`,
+              value: summary.requirements_year === "2022"
+                ? `${summary.observations_count} contact(s)`
+                : `${summary.observations_duration_minutes} min`,
+              pass: summary.observation_requirement_met !== false,
+              detail: summary.observation_requirement_met !== false
+                ? (summary.requirements_year === "2022" ? `${summary.observations_count} contact(s)` : `${summary.observations_duration_minutes} min logged`)
+                : "Below requirement",
+            }] : []),
           ].map((check) => (
             <div key={check.label} className={cn(
               "flex items-center justify-between p-3 rounded-lg",
@@ -114,39 +238,66 @@ export default async function MonthlyReportDetail({ params }: { params: Promise<
         </div>
       </div>
 
-      {/* Supervisor sign-off */}
+      {/* Signatures */}
       <div className={cn(
         "rounded-xl border p-5 mb-5",
-        report.supervisorSigned ? "bg-emerald-50 border-emerald-100" : "bg-white border-[#E8E6F4]"
+        summary.supervisor_signed_at ? "bg-emerald-50 border-emerald-100" : "bg-white border-[#E8E6F4]"
       )}>
-        <div className="flex items-center gap-3">
-          <FileSignature className={cn("w-5 h-5 flex-shrink-0", report.supervisorSigned ? "text-emerald-600" : "text-zinc-400")} />
-          <div className="flex-1">
+        <div className="flex items-center gap-3 mb-4">
+          <FileSignature className={cn("w-5 h-5 flex-shrink-0", summary.supervisor_signed_at ? "text-emerald-600" : "text-zinc-400")} />
+          <div>
             <p className="text-sm font-semibold text-zinc-900">Supervisor Verification</p>
             <p className="text-xs text-zinc-500 mt-0.5">
-              {report.supervisorSigned
-                ? "Dr. Emily Rodriguez has reviewed and signed this report."
-                : "Awaiting review and signature from Dr. Emily Rodriguez."}
+              {summary.supervisor_signed_at
+                ? `${supervisorName} signed on ${new Date(summary.supervisor_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+                : `Awaiting review and signature from ${supervisorName}.`}
             </p>
           </div>
-          {report.supervisorSigned
-            ? <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            : <Clock className="w-5 h-5 text-zinc-300" />
+          {summary.supervisor_signed_at
+            ? <CheckCircle2 className="w-5 h-5 text-emerald-500 ml-auto" />
+            : <Clock className="w-5 h-5 text-zinc-300 ml-auto" />
           }
         </div>
+
+        {summary.trainee_signed_at ? (
+          <div className="flex items-center gap-3 pt-4 border-t border-emerald-100">
+            <FileSignature className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-zinc-900">Trainee Verification</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                You signed on {new Date(summary.trainee_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+              </p>
+            </div>
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 ml-auto" />
+          </div>
+        ) : summary.supervisor_signed_at ? (
+          <div className="pt-4 border-t border-emerald-100 print-hide">
+            <p className="text-xs text-zinc-500 mb-3">Supervisor has signed. You can now add your own sign-off to confirm this report.</p>
+            <button
+              onClick={handleTraineeSign}
+              disabled={traineeSigningInProgress}
+              className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white font-semibold text-sm px-4 py-2 rounded-xl transition-colors"
+            >
+              {traineeSigningInProgress ? (
+                <span className="w-4 h-4 border-2 border-violet-200 border-t-white rounded-full animate-spin" />
+              ) : (
+                <FileSignature className="w-4 h-4" />
+              )}
+              {traineeSigningInProgress ? "Signing…" : "Sign Report"}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3">
-        <button className="flex-1 flex items-center justify-center gap-2 border border-[#E8E6F4] bg-white text-zinc-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-zinc-50 transition-colors">
+      <div className="print-hide flex gap-3">
+        <button
+          onClick={handleDownloadPdf}
+          className="flex-1 flex items-center justify-center gap-2 border border-[#E8E6F4] bg-white text-zinc-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-zinc-50 transition-colors"
+        >
           <Download className="w-4 h-4" />
           Download PDF
         </button>
-        {!report.supervisorSigned && (
-          <button className="flex-1 bg-violet-600 text-white font-semibold py-2.5 rounded-xl text-sm hover:bg-violet-700 transition-colors">
-            Request Signature
-          </button>
-        )}
       </div>
     </div>
   )

@@ -1,8 +1,10 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2 } from "lucide-react"
+import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2, AlertCircle } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
 const CATEGORIES = ["Restricted", "Unrestricted", "Supervision"] as const
@@ -36,9 +38,20 @@ const SUBCATEGORIES: Record<Category, string[]> = {
   ],
 }
 
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00")
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 export default function NewActivityPage() {
+  const router = useRouter()
+  const today = new Date().toISOString().split("T")[0]
+
   const [title, setTitle] = useState("")
-  const [date, setDate] = useState("2025-05-19")
+  const [date, setDate] = useState(today)
   const [startTime, setStartTime] = useState("09:00")
   const [endTime, setEndTime] = useState("11:00")
   const [category, setCategory] = useState<Category>("Restricted")
@@ -46,16 +59,51 @@ export default function NewActivityPage() {
   const [client, setClient] = useState("")
   const [supervisionRelated, setSupervisionRelated] = useState(false)
   const [directObservation, setDirectObservation] = useState(false)
+  const [observationMinutes, setObservationMinutes] = useState(0)
   const [notes, setNotes] = useState("")
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState("")
 
   const startMinutes = parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1])
   const endMinutes = parseInt(endTime.split(":")[0]) * 60 + parseInt(endTime.split(":")[1])
-  const duration = Math.max(0, (endMinutes - startMinutes) / 60)
+  const durationMinutes = Math.max(0, endMinutes - startMinutes)
+  const durationHours = durationMinutes / 60
 
   const handleCategoryChange = (c: Category) => {
     setCategory(c)
     setSubcategory(SUBCATEGORIES[c][0])
+  }
+
+  const handleSave = async () => {
+    setError("")
+    setSaving(true)
+    const supabase = createClient()
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setError("Not signed in"); setSaving(false); return }
+
+    const { error: insertError } = await supabase.from("activities").insert({
+      trainee_id: user.id,
+      title,
+      date,
+      start_time: startTime + ":00",
+      end_time: endTime + ":00",
+      duration_minutes: durationMinutes,
+      category,
+      subcategory,
+      client_name: client || null,
+      observation_with_client: directObservation,
+      observation_duration_minutes: directObservation ? observationMinutes : 0,
+      supervision_present: supervisionRelated,
+      notes: notes || null,
+      status: "draft",
+      week_start_date: getWeekStart(date),
+    })
+
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+    setSaved(true)
   }
 
   if (saved) {
@@ -66,12 +114,15 @@ export default function NewActivityPage() {
         </div>
         <h2 className="text-xl font-bold text-zinc-900 mb-1">Activity logged!</h2>
         <p className="text-sm text-zinc-500 mb-6">
-          {duration.toFixed(1)} hours of {category} activity saved and pending supervisor approval.
+          {durationHours.toFixed(1)} hours of {category} activity saved.
         </p>
         <div className="flex gap-3">
-          <Link href="/trainee/activities/new" onClick={() => setSaved(false)} className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 transition-colors">
+          <button
+            onClick={() => { setSaved(false); setTitle(""); setNotes(""); setClient("") }}
+            className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 transition-colors"
+          >
             Log another
-          </Link>
+          </button>
           <Link href="/trainee/activities" className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition-colors">
             View all activities
           </Link>
@@ -140,10 +191,10 @@ export default function NewActivityPage() {
                 />
               </div>
             </div>
-            {duration > 0 && (
+            {durationMinutes > 0 && (
               <div className="flex items-center gap-2 text-sm text-zinc-500 bg-zinc-50 rounded-lg px-3.5 py-2">
                 <Clock className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Duration: <span className="font-semibold text-zinc-900">{duration.toFixed(1)} hours</span></span>
+                <span>Duration: <span className="font-semibold text-zinc-900">{durationHours.toFixed(1)} hours</span></span>
               </div>
             )}
           </div>
@@ -228,6 +279,20 @@ export default function NewActivityPage() {
               </button>
             ))}
           </div>
+          {directObservation && (
+            <div className="mt-3">
+              <p className="text-xs text-zinc-500 mb-1.5">Observation duration (minutes)</p>
+              <input
+                type="number"
+                min="0"
+                value={observationMinutes}
+                onChange={(e) => setObservationMinutes(parseInt(e.target.value) || 0)}
+                placeholder="e.g. 60"
+                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
+              />
+              <p className="text-[11px] text-zinc-400 mt-1">2027 BACB requirement: concentrated = 90 min/month · supervised = 60 min/month</p>
+            </div>
+          )}
         </div>
 
         {/* Notes */}
@@ -242,18 +307,27 @@ export default function NewActivityPage() {
           />
         </div>
 
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
+
         {/* Save */}
         <button
-          onClick={() => setSaved(true)}
-          disabled={!title || duration <= 0}
+          onClick={handleSave}
+          disabled={!title || durationMinutes <= 0 || saving}
           className={cn(
             "w-full py-3.5 text-sm font-semibold rounded-xl transition-colors",
-            title && duration > 0
+            title && durationMinutes > 0 && !saving
               ? "bg-violet-600 text-white hover:bg-violet-700"
               : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
           )}
         >
-          {title && duration > 0 ? `Save ${duration.toFixed(1)}h ${category} Activity` : "Fill in title and time to continue"}
+          {saving ? "Saving…" : title && durationMinutes > 0
+            ? `Save ${durationHours.toFixed(1)}h ${category} Activity`
+            : "Fill in title and time to continue"}
         </button>
       </div>
     </div>

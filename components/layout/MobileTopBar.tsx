@@ -43,7 +43,7 @@ function getTitle(pathname: string): string {
   if (pathname.startsWith("/supervisor/supervisees/")) return "Trainee Detail"
   if (pathname.startsWith("/supervisor/approvals/")) return "Review Week"
   if (pathname.startsWith("/supervisor/sessions/")) return "Session Detail"
-  return "FieldLog"
+  return "ABA Fieldwork Pro"
 }
 
 function getBackRoute(pathname: string): string | null {
@@ -62,12 +62,9 @@ export function MobileTopBar() {
   const title = getTitle(pathname)
   const backRoute = getBackRoute(pathname)
   const isDashboard = pathname === "/trainee" || pathname === "/supervisor"
-  const isTrainee = pathname.startsWith("/trainee")
-  const isSupervisor = pathname.startsWith("/supervisor")
-  const isRoleSection = isTrainee || isSupervisor
 
   return (
-    <header className="md:hidden sticky top-0 z-30 bg-white border-b border-zinc-100 safe-top">
+    <header className="md:hidden print:hidden sticky top-0 z-30 bg-white border-b border-zinc-100 safe-top">
       <div className="flex items-center h-14 px-4">
         {/* Left: back button or logo */}
         {backRoute ? (
@@ -83,38 +80,15 @@ export function MobileTopBar() {
             <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center">
               <ClipboardList className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="font-bold text-zinc-900 text-sm tracking-tight">FieldLog</span>
+            <span className="font-bold text-zinc-900 text-sm tracking-tight">ABA Fieldwork Pro</span>
           </div>
         ) : (
           <div className="w-7" />
         )}
 
-        {/* Center: role toggle on trainee/supervisor pages, otherwise page title */}
-        <div className="flex-1 flex items-center justify-center">
-          {isRoleSection ? (
-            <div className="flex items-center bg-zinc-100 rounded-lg p-0.5">
-              <Link
-                href="/trainee"
-                className={cn(
-                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all",
-                  isTrainee ? "bg-white text-violet-700 shadow-sm" : "text-zinc-400"
-                )}
-              >
-                Trainee
-              </Link>
-              <Link
-                href="/supervisor"
-                className={cn(
-                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all",
-                  isSupervisor ? "bg-white text-violet-700 shadow-sm" : "text-zinc-400"
-                )}
-              >
-                Supervisor
-              </Link>
-            </div>
-          ) : (
-            <span className="text-sm font-semibold text-zinc-900">{title}</span>
-          )}
+        {/* Center: page title */}
+        <div className={cn("flex-1 text-center", backRoute ? "pr-14" : isDashboard ? "pr-12" : "")}>
+          <span className="text-sm font-semibold text-zinc-900">{title}</span>
         </div>
 
         {/* Right: bell → notifications page */}

@@ -2,7 +2,7 @@ import sharp from "sharp"
 import { writeFileSync } from "fs"
 import { mkdirSync } from "fs"
 
-// FieldLog icon — violet rounded square with white clipboard
+// ABA Fieldwork Pro icon — violet rounded square with white clipboard
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <!-- Background -->
   <rect width="512" height="512" rx="112" fill="#7C3AED"/>

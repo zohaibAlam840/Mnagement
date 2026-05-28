@@ -2,19 +2,20 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, Lock, Smartphone, LogOut, CheckCircle2, Eye, EyeOff, AlertTriangle, Monitor, Clock } from "lucide-react"
+import { ChevronLeft, Lock, Smartphone, LogOut, CheckCircle2, Eye, EyeOff, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { SignOutButton } from "@/components/auth/SignOutButton"
+import { createClient } from "@/lib/supabase/client"
 
 export default function SecurityPage() {
-  const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
-  const [currentPw, setCurrentPw] = useState("")
   const [newPw, setNewPw] = useState("")
   const [confirmPw, setConfirmPw] = useState("")
   const [twoFAEnabled, setTwoFAEnabled] = useState(false)
   const [pwSaved, setPwSaved] = useState(false)
   const [pwError, setPwError] = useState("")
+  const [saving, setSaving] = useState(false)
 
   const strengthScore = (() => {
     if (!newPw) return 0
@@ -29,13 +30,16 @@ export default function SecurityPage() {
   const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][strengthScore]
   const strengthColor = ["", "bg-red-500", "bg-amber-400", "bg-blue-500", "bg-emerald-500"][strengthScore]
 
-  const handlePasswordSave = () => {
+  const handlePasswordSave = async () => {
     setPwError("")
-    if (!currentPw) return setPwError("Enter your current password")
     if (newPw.length < 8) return setPwError("New password must be at least 8 characters")
     if (newPw !== confirmPw) return setPwError("Passwords don't match")
+    setSaving(true)
+    const supabase = createClient()
+    const { error } = await supabase.auth.updateUser({ password: newPw })
+    setSaving(false)
+    if (error) { setPwError(error.message); return }
     setPwSaved(true)
-    setCurrentPw("")
     setNewPw("")
     setConfirmPw("")
     setTimeout(() => setPwSaved(false), 3000)
@@ -60,27 +64,11 @@ export default function SecurityPage() {
           </div>
           <div>
             <p className="text-sm font-semibold text-zinc-900">Change password</p>
-            <p className="text-xs text-zinc-400">Last changed 3 months ago</p>
+            <p className="text-xs text-zinc-400">Enter a new password for your account</p>
           </div>
         </div>
 
         <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-zinc-700 mb-1.5">Current password</label>
-            <div className="relative">
-              <input
-                type={showCurrent ? "text" : "password"}
-                value={currentPw}
-                onChange={(e) => setCurrentPw(e.target.value)}
-                placeholder="Enter current password"
-                className="w-full px-3.5 py-2.5 pr-10 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
-              />
-              <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
-                {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
           <div>
             <label className="block text-xs font-semibold text-zinc-700 mb-1.5">New password</label>
             <div className="relative">
@@ -138,12 +126,13 @@ export default function SecurityPage() {
 
           <button
             onClick={handlePasswordSave}
+            disabled={saving || newPw.length < 8 || newPw !== confirmPw}
             className={cn(
-              "w-full py-2.5 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2",
+              "w-full py-2.5 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60",
               pwSaved ? "bg-emerald-600 text-white" : "bg-violet-600 text-white hover:bg-violet-700"
             )}
           >
-            {pwSaved ? <><CheckCircle2 className="w-4 h-4" /> Password updated</> : "Update password"}
+            {pwSaved ? <><CheckCircle2 className="w-4 h-4" /> Password updated</> : saving ? "Updating…" : "Update password"}
           </button>
         </div>
       </div>
@@ -185,53 +174,17 @@ export default function SecurityPage() {
         )}
       </div>
 
-      {/* Active sessions */}
-      <div className="bg-white rounded-xl border border-[#E8E6F4] mb-4">
-        <div className="px-5 py-4 border-b border-zinc-50">
-          <p className="text-sm font-semibold text-zinc-900">Active sessions</p>
-          <p className="text-xs text-zinc-400 mt-0.5">Devices currently signed in to your account</p>
-        </div>
-        <div className="divide-y divide-zinc-50">
-          {[
-            { device: "MacBook Pro · Chrome", location: "Chicago, IL", time: "Now", current: true },
-            { device: "iPhone 15 · FieldLog App", location: "Chicago, IL", time: "2 hours ago", current: false },
-            { device: "iPad · Safari", location: "Chicago, IL", time: "Yesterday", current: false },
-          ].map((session, i) => (
-            <div key={i} className="flex items-center gap-4 px-5 py-3.5">
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 flex items-center justify-center flex-shrink-0">
-                <Monitor className="w-4 h-4 text-zinc-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-zinc-800 truncate">{session.device}</p>
-                  {session.current && <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full flex-shrink-0">Current</span>}
-                </div>
-                <p className="text-xs text-zinc-400 flex items-center gap-1"><Clock className="w-3 h-3" /> {session.location} · {session.time}</p>
-              </div>
-              {!session.current && (
-                <button className="text-xs font-semibold text-red-500 hover:text-red-600 flex-shrink-0">
-                  Revoke
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Danger zone */}
       <div className="bg-red-50 border border-red-100 rounded-xl p-5">
         <p className="text-sm font-semibold text-red-800 mb-1">Danger zone</p>
         <p className="text-xs text-red-600 mb-4">These actions are permanent and cannot be undone.</p>
         <div className="space-y-2">
-          <Link href="/login" className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
+          <SignOutButton className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
             <div className="flex items-center gap-2.5">
               <LogOut className="w-4 h-4 text-red-500" />
               <span className="text-sm font-semibold text-red-700">Sign out all devices</span>
             </div>
-          </Link>
-          <button className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors">
-            <span className="text-sm font-semibold text-red-700">Delete account</span>
-          </button>
+          </SignOutButton>
         </div>
       </div>
     </div>

@@ -15,7 +15,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <BottomNav />
 
       {/* Main content — offset for sidebar on desktop, padded for bottom nav on mobile */}
-      <main className="md:pl-[240px] dashboard-main md:pb-0 min-h-screen">
+      <main className="md:pl-[240px] print:pl-0 dashboard-main md:pb-0 min-h-screen">
         {children}
       </main>
     </div>

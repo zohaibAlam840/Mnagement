@@ -10,7 +10,7 @@ export default function LandingPage() {
           <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center">
             <ClipboardList className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-zinc-900 tracking-tight">FieldLog</span>
+          <span className="font-semibold text-zinc-900 tracking-tight">ABA Fieldwork Pro</span>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/login" className="text-sm text-zinc-500 hover:text-zinc-900 transition-colors font-medium">
@@ -37,7 +37,7 @@ export default function LandingPage() {
           <span className="text-violet-600">by hand.</span>
         </h1>
         <p className="text-lg text-zinc-500 max-w-xl mx-auto mb-10 leading-relaxed">
-          Connect your Google Calendar, confirm activities weekly, and let FieldLog
+          Connect your Google Calendar, confirm activities weekly, and let ABA Fieldwork Pro
           calculate your BACB compliance ratios automatically.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -82,7 +82,7 @@ export default function LandingPage() {
           {[
             {
               title: "Calendar Sync",
-              desc: "Connect your Google Calendar. FieldLog pulls your scheduled sessions automatically — no double entry.",
+              desc: "Connect your Google Calendar. ABA Fieldwork Pro pulls your scheduled sessions automatically — no double entry.",
             },
             {
               title: "BACB Compliance Engine",
@@ -123,7 +123,7 @@ export default function LandingPage() {
               {
                 step: "03",
                 title: "Confirm weekly, done",
-                desc: "Every week, review what FieldLog pulled from your calendar. Confirm in seconds. Your supervisor gets a notification to approve.",
+                desc: "Every week, review what ABA Fieldwork Pro pulled from your calendar. Confirm in seconds. Your supervisor gets a notification to approve.",
               },
             ].map((s) => (
               <div key={s.step} className="flex gap-5 items-start">
@@ -165,7 +165,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="px-6 py-6 border-t border-zinc-100 text-center">
-        <p className="text-xs text-zinc-400">© 2025 FieldLog · Built for BCBA fieldwork tracking</p>
+        <p className="text-xs text-zinc-400">© 2025 ABA Fieldwork Pro · Built for BCBA fieldwork tracking</p>
       </footer>
     </div>
   )

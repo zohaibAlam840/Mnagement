@@ -9,7 +9,7 @@ export default function NotFound() {
         <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center">
           <ClipboardList className="w-4.5 h-4.5 text-white" />
         </div>
-        <span className="font-bold text-zinc-900 text-lg tracking-tight">FieldLog</span>
+        <span className="font-bold text-zinc-900 text-lg tracking-tight">ABA Fieldwork Pro</span>
       </div>
 
       {/* 404 illustration */}
@@ -59,7 +59,7 @@ export default function NotFound() {
       </div>
 
       <p className="text-xs text-zinc-300 mt-12">
-        FieldLog · BACB Fieldwork Tracker
+        ABA Fieldwork Pro · BACB Fieldwork Tracker
       </p>
     </div>
   )

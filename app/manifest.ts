@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next"
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "FieldLog — BACB Fieldwork Tracker",
-    short_name: "FieldLog",
+    name: "ABA Fieldwork Pro — BACB Fieldwork Tracker",
+    short_name: "ABA Fieldwork Pro",
     description: "Track BACB fieldwork hours, compliance ratios, and supervisor approvals.",
     start_url: "/login",
     display: "standalone",

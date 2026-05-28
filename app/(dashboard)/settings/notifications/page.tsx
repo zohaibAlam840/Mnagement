@@ -1,13 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { ChevronLeft, Bell, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
 type Toggle = { id: string; label: string; desc: string; on: boolean }
+type Frequency = "immediately" | "daily" | "weekly"
 
-const INITIAL_TOGGLES: Toggle[] = [
+const DEFAULT_PUSH: Toggle[] = [
   { id: "weekly_reminder", label: "Weekly review reminder", desc: "Remind me to review my weekly log every Friday", on: true },
   { id: "approval_notify", label: "Approval notifications", desc: "Alert when supervisor approves or rejects an activity", on: true },
   { id: "session_confirm", label: "Session confirmations", desc: "Notify when a supervision session is confirmed", on: true },
@@ -16,19 +18,35 @@ const INITIAL_TOGGLES: Toggle[] = [
   { id: "supervisor_msg", label: "Supervisor messages", desc: "Push notification for direct messages from my supervisor", on: false },
 ]
 
-const EMAIL_TOGGLES: Toggle[] = [
+const DEFAULT_EMAIL: Toggle[] = [
   { id: "email_weekly", label: "Weekly digest", desc: "Summary of hours logged each week", on: true },
   { id: "email_approval", label: "Approval updates", desc: "Email when supervisor acts on your submissions", on: true },
   { id: "email_monthly", label: "Monthly report", desc: "Full compliance report at the end of each month", on: false },
 ]
 
-type Frequency = "immediately" | "daily" | "weekly"
-
 export default function NotificationsSettingsPage() {
-  const [push, setPush] = useState(INITIAL_TOGGLES)
-  const [email, setEmail] = useState(EMAIL_TOGGLES)
+  const [push, setPush] = useState(DEFAULT_PUSH)
+  const [email, setEmail] = useState(DEFAULT_EMAIL)
   const [frequency, setFrequency] = useState<Frequency>("immediately")
+  const [userEmail, setUserEmail] = useState("")
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      setUserEmail(user.email ?? "")
+      const prefs = user.user_metadata?.notif_prefs
+      if (prefs) {
+        if (prefs.push) setPush((prev) => prev.map((t) => ({ ...t, on: prefs.push[t.id] ?? t.on })))
+        if (prefs.email) setEmail((prev) => prev.map((t) => ({ ...t, on: prefs.email[t.id] ?? t.on })))
+        if (prefs.frequency) setFrequency(prefs.frequency)
+      }
+    }
+    load()
+  }, [])
 
   const togglePush = (id: string) =>
     setPush((prev) => prev.map((t) => (t.id === id ? { ...t, on: !t.on } : t)))
@@ -36,7 +54,19 @@ export default function NotificationsSettingsPage() {
   const toggleEmail = (id: string) =>
     setEmail((prev) => prev.map((t) => (t.id === id ? { ...t, on: !t.on } : t)))
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    setSaving(true)
+    const supabase = createClient()
+    await supabase.auth.updateUser({
+      data: {
+        notif_prefs: {
+          push: Object.fromEntries(push.map((t) => [t.id, t.on])),
+          email: Object.fromEntries(email.map((t) => [t.id, t.on])),
+          frequency,
+        },
+      },
+    })
+    setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
@@ -49,7 +79,7 @@ export default function NotificationsSettingsPage() {
 
       <div className="mb-6">
         <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Notifications</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">Choose how and when FieldLog contacts you</p>
+        <p className="text-sm text-zinc-500 mt-0.5">Choose how and when ABA Fieldwork Pro contacts you</p>
       </div>
 
       {/* Push notifications */}
@@ -77,7 +107,7 @@ export default function NotificationsSettingsPage() {
                   item.on ? "bg-violet-600 justify-end" : "bg-zinc-200 justify-start"
                 )}
               >
-                <div className={cn("w-5 h-5 rounded-full bg-white shadow-sm mx-0.5 transition-all")} />
+                <div className="w-5 h-5 rounded-full bg-white shadow-sm mx-0.5" />
               </button>
             </div>
           ))}
@@ -88,7 +118,7 @@ export default function NotificationsSettingsPage() {
       <div className="bg-white rounded-xl border border-[#E8E6F4] mb-4">
         <div className="px-5 py-4 border-b border-zinc-50">
           <p className="text-sm font-semibold text-zinc-900">Email Notifications</p>
-          <p className="text-xs text-zinc-400 mt-0.5">Sent to sarah.mitchell@email.com</p>
+          <p className="text-xs text-zinc-400 mt-0.5">Sent to {userEmail || "your email"}</p>
         </div>
         <div className="divide-y divide-zinc-50">
           {email.map((item) => (
@@ -146,12 +176,13 @@ export default function NotificationsSettingsPage() {
 
       <button
         onClick={handleSave}
+        disabled={saving}
         className={cn(
-          "w-full py-3 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2",
+          "w-full py-3 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60",
           saved ? "bg-emerald-600 text-white" : "bg-violet-600 text-white hover:bg-violet-700"
         )}
       >
-        {saved ? <><CheckCircle2 className="w-4 h-4" /> Saved!</> : "Save preferences"}
+        {saved ? <><CheckCircle2 className="w-4 h-4" /> Saved!</> : saving ? "Saving…" : "Save preferences"}
       </button>
     </div>
   )

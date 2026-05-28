@@ -1,179 +1,689 @@
 "use client"
 
-import { useState } from "react"
-import { ChevronLeft, ChevronRight, Check, Pencil, Trash2, CalendarDays, AlertTriangle } from "lucide-react"
-import { weeklyActivities } from "@/lib/mock-data"
+import { useState, useEffect, useCallback } from "react"
+import Link from "next/link"
+import {
+  ChevronLeft, ChevronRight, Check, Pencil, CalendarDays,
+  AlertTriangle, CheckCircle2, Clock, Send, RotateCcw, Calendar, X
+} from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import type { Database } from "@/lib/supabase/types"
 
-const dayGroups = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
+type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
+type ActivityCategory = Database["public"]["Enums"] extends { activity_category: infer E } ? E : "Restricted" | "Unrestricted" | "Supervision"
+
+type GCalEvent = {
+  id: string
+  summary?: string
+  start: { dateTime?: string; date?: string }
+  end: { dateTime?: string; date?: string }
+  status?: string
+}
+
+type ImportItem = {
+  event: GCalEvent
+  category: "Restricted" | "Unrestricted" | "Supervision"
+  selected: boolean
+}
+
+function toLocalDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+function getWeekStart(date: Date): string {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  return toLocalDateStr(d)
+}
+
+function getWeekEnd(weekStart: string): string {
+  const d = new Date(weekStart + "T00:00:00")
+  d.setDate(d.getDate() + 6)
+  return toLocalDateStr(d)
+}
+
+function formatWeekRange(weekStart: string): string {
+  const start = new Date(weekStart + "T00:00:00")
+  const end = new Date(weekStart + "T00:00:00")
+  end.setDate(end.getDate() + 6)
+  const mo: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" }
+  return `${start.toLocaleDateString("en-US", mo)} – ${end.toLocaleDateString("en-US", { ...mo, year: "numeric" })}`
+}
+
+function formatTime(t: string) {
+  const [h, m] = t.split(":")
+  const hr = parseInt(h)
+  return `${hr % 12 || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`
+}
+
+function getDayName(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" })
+}
+
+function formatDateShort(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
+function parseGCalTime(event: GCalEvent) {
+  const startDT = new Date(event.start.dateTime!)
+  const endDT = new Date(event.end.dateTime!)
+  const durationMins = Math.round((endDT.getTime() - startDT.getTime()) / 60000)
+  const date = toLocalDateStr(startDT)
+  const startTime = `${String(startDT.getHours()).padStart(2, "0")}:${String(startDT.getMinutes()).padStart(2, "0")}`
+  const endTime = `${String(endDT.getHours()).padStart(2, "0")}:${String(endDT.getMinutes()).padStart(2, "0")}`
+  return { date, startTime, endTime, durationMins }
+}
+
+const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 export default function WeeklyReviewPage() {
-  const [confirmed, setConfirmed] = useState<Set<string>>(
-    new Set(weeklyActivities.filter((a) => a.confirmed).map((a) => a.id))
-  )
+  const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
+  const [activities, setActivities] = useState<ActivityRow[]>([])
+  const [review, setReview] = useState<WeeklyReviewRow | null>(null)
+  const [supervisorId, setSupervisorId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState("")
+  const [submitSuccess, setSubmitSuccess] = useState(false)
 
-  const toggleConfirm = (id: string) => {
-    setConfirmed((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+  // Calendar import state
+  const [showImport, setShowImport] = useState(false)
+  const [importItems, setImportItems] = useState<ImportItem[]>([])
+  const [importLoading, setImportLoading] = useState(false)
+  const [importError, setImportError] = useState("")
+  const [importing, setImporting] = useState(false)
+  const [importSuccess, setImportSuccess] = useState(0)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setSubmitSuccess(false)
+    setSubmitError("")
+
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const [
+      { data: acts },
+      { data: rev },
+      { data: rel }
+    ] = await Promise.all([
+      supabase.from("activities").select("*")
+        .eq("trainee_id", user.id)
+        .gte("date", weekStart)
+        .lte("date", getWeekEnd(weekStart))
+        .order("date", { ascending: true })
+        .order("start_time", { ascending: true }),
+      supabase.from("weekly_reviews").select("*")
+        .eq("trainee_id", user.id)
+        .eq("week_start_date", weekStart)
+        .maybeSingle(),
+      supabase.from("supervisor_relationships").select("supervisor_id")
+        .eq("trainee_id", user.id)
+        .eq("status", "active")
+        .eq("is_primary", true)
+        .maybeSingle(),
+    ])
+
+    setActivities(acts ?? [])
+    setReview(rev ?? null)
+    setSupervisorId(rel?.supervisor_id ?? null)
+    setLoading(false)
+  }, [weekStart])
+
+  useEffect(() => { load() }, [load])
+
+  const todayWeekStart = getWeekStart(new Date())
+
+  const prevWeek = () => {
+    const d = new Date(weekStart + "T00:00:00")
+    d.setDate(d.getDate() - 7)
+    setWeekStart(toLocalDateStr(d))
+  }
+  const nextWeek = () => {
+    if (weekStart >= todayWeekStart) return
+    const d = new Date(weekStart + "T00:00:00")
+    d.setDate(d.getDate() + 7)
+    setWeekStart(toLocalDateStr(d))
   }
 
-  const allConfirmed = weeklyActivities.every((a) => confirmed.has(a.id))
-  const totalHours = weeklyActivities.reduce((s, a) => s + a.duration, 0)
-  const confirmedHours = weeklyActivities.filter((a) => confirmed.has(a.id)).reduce((s, a) => s + a.duration, 0)
+  const handleOpenImport = async () => {
+    setShowImport(true)
+    setImportItems([])
+    setImportError("")
+    setImportSuccess(0)
+    setImportLoading(true)
+
+    const weekEnd = getWeekEnd(weekStart)
+    const timeMin = new Date(weekStart + "T00:00:00").toISOString()
+    const timeMax = new Date(weekEnd + "T23:59:59").toISOString()
+
+    try {
+      const res = await fetch(`/api/calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`)
+      const data = await res.json()
+
+      if (!res.ok) {
+        if (data.error === "not_connected") {
+          setImportError("Google Calendar is not connected. Go to Settings → Calendar Sync to connect.")
+        } else {
+          setImportError(data.error || "Failed to fetch calendar events.")
+        }
+        setImportLoading(false)
+        return
+      }
+
+      if (data.length === 0) {
+        setImportError("No events found in Google Calendar for this week.")
+        setImportLoading(false)
+        return
+      }
+
+      setImportItems(data.map((e: GCalEvent) => ({
+        event: e,
+        category: "Restricted" as const,
+        selected: true,
+      })))
+    } catch {
+      setImportError("Network error. Please try again.")
+    }
+    setImportLoading(false)
+  }
+
+  const handleConfirmImport = async () => {
+    const selected = importItems.filter(i => i.selected)
+    if (selected.length === 0) return
+
+    setImporting(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const activitiesToInsert = selected.map(item => {
+      const { date, startTime, endTime, durationMins } = parseGCalTime(item.event)
+      return {
+        trainee_id: user.id,
+        title: item.event.summary || "Imported from Google Calendar",
+        date,
+        start_time: startTime,
+        end_time: endTime,
+        duration_minutes: durationMins,
+        category: item.category,
+        status: "draft" as const,
+        notes: null,
+        week_start_date: weekStart,
+      }
+    })
+
+    const { error } = await supabase.from("activities").insert(activitiesToInsert)
+    if (error) {
+      setImportError(error.message)
+    } else {
+      setImportSuccess(selected.length)
+      setShowImport(false)
+      await load()
+    }
+    setImporting(false)
+  }
+
+  const handleSubmit = async () => {
+    if (!supervisorId) {
+      setSubmitError("No active supervisor linked. Ask your supervisor to connect with you first.")
+      return
+    }
+    if (activities.length === 0) return
+
+    setSubmitting(true)
+    setSubmitError("")
+
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const weekEnd = getWeekEnd(weekStart)
+    const totalH = activities.reduce((s, a) => s + a.duration_minutes, 0) / 60
+    const restrictedH = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
+    const unrestrictedH = activities.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
+    const supervisionH = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+
+    const reviewPayload = {
+      trainee_id: user.id,
+      supervisor_id: supervisorId,
+      week_start_date: weekStart,
+      week_end_date: weekEnd,
+      total_hours: totalH,
+      restricted_hours: restrictedH,
+      unrestricted_hours: unrestrictedH,
+      supervision_hours: supervisionH,
+      status: "submitted" as const,
+      submitted_at: new Date().toISOString(),
+      reviewed_at: null,
+      supervisor_notes: null,
+    }
+
+    let reviewError
+    let reviewData: WeeklyReviewRow | null = null
+
+    if (review) {
+      const { data, error } = await supabase
+        .from("weekly_reviews")
+        .update(reviewPayload)
+        .eq("id", review.id)
+        .select()
+        .single()
+      reviewError = error
+      reviewData = data
+    } else {
+      const { data, error } = await supabase
+        .from("weekly_reviews")
+        .insert(reviewPayload)
+        .select()
+        .single()
+      reviewError = error
+      reviewData = data
+    }
+
+    if (reviewError) {
+      setSubmitError(reviewError.message)
+      setSubmitting(false)
+      return
+    }
+
+    const draftIds = activities.filter(a => a.status === "draft").map(a => a.id)
+    if (draftIds.length > 0) {
+      await supabase.from("activities").update({ status: "submitted" }).in("id", draftIds)
+    }
+
+    await supabase.from("notifications").insert({
+      user_id: supervisorId,
+      type: "review_submitted",
+      title: "Weekly review submitted",
+      body: `A trainee submitted their week of ${formatWeekRange(weekStart)} for your review.`,
+      read: false,
+      related_id: reviewData?.id ?? null,
+    })
+
+    setSubmitting(false)
+    setSubmitSuccess(true)
+    await load()
+  }
+
+  const totalHours = activities.reduce((s, a) => s + a.duration_minutes, 0) / 60
+  const restrictedHours = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
+  const unrestrictedHours = activities.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
+  const supervisionHours = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+
+  const isSubmitted = review?.status === "submitted"
+  const isApproved = review?.status === "approved"
+  const isRejected = review?.status === "rejected"
+  const isCurrentWeek = weekStart === todayWeekStart
+  const canImport = !isSubmitted && !isApproved
+
+  const grouped = WEEK_DAYS
+    .map((dayName) => ({ dayName, acts: activities.filter((a) => getDayName(a.date) === dayName) }))
+    .filter(g => g.acts.length > 0)
 
   return (
     <div className="p-4 md:p-7 max-w-3xl mx-auto">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Weekly Review</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Confirm your activities before submitting to your supervisor</p>
+          <p className="text-sm text-zinc-500 mt-0.5">Review and submit your week to your supervisor</p>
         </div>
+        {canImport && (
+          <button
+            onClick={handleOpenImport}
+            className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-100 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Import from Calendar
+          </button>
+        )}
       </div>
 
-      {/* Week nav */}
+      {/* Week navigator */}
       <div className="flex items-center justify-between bg-white rounded-xl border border-[#E8E6F4] px-4 py-3 mb-5">
-        <button className="w-8 h-8 rounded-lg hover:bg-zinc-50 flex items-center justify-center text-zinc-400 transition-colors">
+        <button onClick={prevWeek} className="w-8 h-8 rounded-lg hover:bg-zinc-50 flex items-center justify-center text-zinc-400 transition-colors">
           <ChevronLeft className="w-4 h-4" />
         </button>
         <div className="text-center">
           <div className="flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-violet-600" />
-            <p className="text-sm font-semibold text-zinc-900">May 19–23, 2025</p>
+            <p className="text-sm font-semibold text-zinc-900">{formatWeekRange(weekStart)}</p>
           </div>
-          <p className="text-xs text-zinc-400 mt-0.5">Week 21 · {confirmedHours}/{totalHours}h confirmed</p>
+          {isCurrentWeek
+            ? <p className="text-xs text-violet-500 mt-0.5 font-medium">Current week</p>
+            : <p className="text-xs text-zinc-400 mt-0.5">{totalHours.toFixed(1)}h logged</p>
+          }
         </div>
-        <button className="w-8 h-8 rounded-lg hover:bg-zinc-50 flex items-center justify-center text-zinc-400 transition-colors">
+        <button
+          onClick={nextWeek}
+          disabled={isCurrentWeek}
+          className="w-8 h-8 rounded-lg hover:bg-zinc-50 flex items-center justify-center text-zinc-400 transition-colors disabled:opacity-30"
+        >
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Progress bar */}
-      <div className="bg-white rounded-xl border border-[#E8E6F4] px-4 py-3 mb-5">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-zinc-700">Confirmation progress</span>
-          <span className="text-xs font-semibold text-violet-600">{confirmed.size} / {weeklyActivities.length} activities</span>
+      {loading ? (
+        <div className="py-12 text-center">
+          <div className="w-6 h-6 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin mx-auto" />
         </div>
-        <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-violet-500 rounded-full transition-all"
-            style={{ width: `${(confirmed.size / weeklyActivities.length) * 100}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Alert: unconfirmed */}
-      {!allConfirmed && (
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
-          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <span>{weeklyActivities.length - confirmed.size} activities still need your confirmation before you can submit.</span>
-        </div>
-      )}
-
-      {/* Activities by day */}
-      <div className="space-y-4 mb-6">
-        {dayGroups.map((day) => {
-          const dayActivities = weeklyActivities.filter((a) => a.day === day)
-          if (dayActivities.length === 0) return null
-          return (
-            <div key={day}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">{day}</span>
-                <span className="text-xs text-zinc-300">{dayActivities[0].date}</span>
-                <div className="flex-1 h-px bg-zinc-100" />
-                <span className="text-xs text-zinc-400">
-                  {dayActivities.reduce((s, a) => s + a.duration, 0)}h
-                </span>
-              </div>
-              <div className="space-y-2">
-                {dayActivities.map((a) => {
-                  const isConfirmed = confirmed.has(a.id)
-                  return (
-                    <div
-                      key={a.id}
-                      className={cn(
-                        "flex items-center gap-3 bg-white rounded-xl border px-4 py-3.5 transition-all",
-                        isConfirmed ? "border-emerald-100 bg-emerald-50/30" : "border-[#E8E6F4]"
-                      )}
-                    >
-                      <button
-                        onClick={() => toggleConfirm(a.id)}
-                        className={cn(
-                          "w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
-                          isConfirmed ? "bg-emerald-500 border-emerald-500" : "border-zinc-300 hover:border-violet-400"
-                        )}
-                      >
-                        {isConfirmed && <Check className="w-3.5 h-3.5 text-white" />}
-                      </button>
-
-                      <div className="flex-1 min-w-0">
-                        <p className={cn("text-sm font-semibold truncate", isConfirmed ? "text-zinc-700" : "text-zinc-900")}>
-                          {a.title}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px] text-zinc-400">{a.startTime}–{a.endTime}</span>
-                          <span className={cn(
-                            "text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
-                            a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                            a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                            "bg-blue-50 text-blue-700"
-                          )}>
-                            {a.category}
-                          </span>
-                          {a.source === "manual" && (
-                            <span className="text-[10px] text-zinc-400 italic">manual</span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="text-sm font-semibold text-zinc-600">{a.duration}h</span>
-                        <button className="w-7 h-7 rounded-lg hover:bg-zinc-100 flex items-center justify-center text-zinc-400 transition-colors">
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button className="w-7 h-7 rounded-lg hover:bg-red-50 flex items-center justify-center text-zinc-400 hover:text-red-500 transition-colors">
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
+      ) : (
+        <>
+          {/* Status banners */}
+          {isApproved && (
+            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-emerald-800">Week approved</p>
+                <p className="text-xs text-emerald-600 mt-0.5">Your supervisor approved this week's activities.</p>
               </div>
             </div>
-          )
-        })}
-      </div>
-
-      {/* Week summary + submit */}
-      <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-        <h3 className="text-sm font-semibold text-zinc-900 mb-3">Week summary</h3>
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          {[
-            { label: "Restricted", value: `${weeklyActivities.filter((a) => a.category === "Restricted").reduce((s, a) => s + a.duration, 0)}h`, color: "text-violet-600" },
-            { label: "Unrestricted", value: `${weeklyActivities.filter((a) => a.category === "Unrestricted").reduce((s, a) => s + a.duration, 0)}h`, color: "text-blue-600" },
-            { label: "Supervision", value: `${weeklyActivities.filter((a) => a.category === "Supervision").reduce((s, a) => s + a.duration, 0)}h`, color: "text-emerald-600" },
-          ].map((s) => (
-            <div key={s.label} className="text-center">
-              <p className={cn("text-xl font-bold", s.color)}>{s.value}</p>
-              <p className="text-[11px] text-zinc-400 mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
-        <button
-          disabled={!allConfirmed}
-          className={cn(
-            "w-full py-3 rounded-xl text-sm font-semibold transition-all",
-            allConfirmed
-              ? "bg-violet-600 text-white hover:bg-violet-700"
-              : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
           )}
-        >
-          {allConfirmed ? "Submit to Dr. Rodriguez →" : `Confirm all activities to submit`}
-        </button>
-      </div>
+          {isRejected && (
+            <div className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-5">
+              <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-red-800">Review returned by supervisor</p>
+                {review?.supervisor_notes && (
+                  <p className="text-xs text-red-600 mt-1 leading-relaxed">"{review.supervisor_notes}"</p>
+                )}
+              </div>
+            </div>
+          )}
+          {isSubmitted && (
+            <div className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5">
+              <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <p className="text-sm text-amber-800">Submitted — awaiting supervisor review.</p>
+            </div>
+          )}
+          {submitSuccess && (
+            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <p className="text-sm text-emerald-800">Successfully submitted to your supervisor!</p>
+            </div>
+          )}
+          {importSuccess > 0 && (
+            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <p className="text-sm text-emerald-800">{importSuccess} event{importSuccess > 1 ? "s" : ""} imported from Google Calendar as draft activities.</p>
+            </div>
+          )}
+
+          {/* Calendar import panel */}
+          {showImport && (
+            <div className="bg-white rounded-xl border border-violet-200 mb-5 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-violet-100 bg-violet-50">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-violet-600" />
+                  <p className="text-sm font-semibold text-violet-900">Import from Google Calendar</p>
+                </div>
+                <button onClick={() => setShowImport(false)} className="text-zinc-400 hover:text-zinc-600 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {importLoading ? (
+                <div className="py-10 flex flex-col items-center gap-3">
+                  <div className="w-6 h-6 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+                  <p className="text-xs text-zinc-400">Fetching calendar events…</p>
+                </div>
+              ) : importError ? (
+                <div className="p-5">
+                  <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-lg px-4 py-3">
+                    <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-700">{importError}</p>
+                  </div>
+                  {importError.includes("not connected") && (
+                    <Link href="/settings/calendar" className="mt-3 inline-flex text-sm font-semibold text-violet-600 hover:text-violet-700">
+                      Go to Calendar Settings →
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div className="px-5 py-3 border-b border-zinc-50 flex items-center justify-between">
+                    <p className="text-xs text-zinc-500">{importItems.filter(i => i.selected).length} of {importItems.length} selected</p>
+                    <button
+                      onClick={() => setImportItems(items => items.map(i => ({ ...i, selected: !items.every(x => x.selected) })))}
+                      className="text-xs font-medium text-violet-600 hover:text-violet-700"
+                    >
+                      {importItems.every(i => i.selected) ? "Deselect all" : "Select all"}
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-zinc-50 max-h-80 overflow-y-auto">
+                    {importItems.map((item, idx) => {
+                      const { date, startTime, endTime, durationMins } = parseGCalTime(item.event)
+                      return (
+                        <div
+                          key={item.event.id}
+                          className={cn(
+                            "flex items-center gap-3 px-5 py-3.5 transition-colors",
+                            item.selected ? "bg-white" : "bg-zinc-50 opacity-60"
+                          )}
+                        >
+                          <button
+                            onClick={() => setImportItems(items => items.map((it, i) => i === idx ? { ...it, selected: !it.selected } : it))}
+                            className={cn(
+                              "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                              item.selected ? "bg-violet-600 border-violet-600" : "border-zinc-300"
+                            )}
+                          >
+                            {item.selected && <Check className="w-3 h-3 text-white" />}
+                          </button>
+
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-zinc-900 truncate">{item.event.summary || "Untitled event"}</p>
+                            <p className="text-xs text-zinc-400 mt-0.5">
+                              {new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                              {" · "}
+                              {formatTime(startTime)} – {formatTime(endTime)}
+                              {" · "}
+                              {(durationMins / 60).toFixed(1)}h
+                            </p>
+                          </div>
+
+                          <select
+                            value={item.category}
+                            onChange={e => setImportItems(items => items.map((it, i) => i === idx ? { ...it, category: e.target.value as any } : it))}
+                            disabled={!item.selected}
+                            className="text-xs font-semibold border border-zinc-200 rounded-lg px-2 py-1.5 focus:outline-none bg-white disabled:opacity-40 text-zinc-700"
+                          >
+                            <option value="Restricted">Restricted</option>
+                            <option value="Unrestricted">Unrestricted</option>
+                            <option value="Supervision">Supervision</option>
+                          </select>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="px-5 py-4 border-t border-zinc-100 flex gap-3">
+                    <button
+                      onClick={handleConfirmImport}
+                      disabled={importing || importItems.filter(i => i.selected).length === 0}
+                      className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white font-semibold text-sm px-4 py-2 rounded-xl transition-colors"
+                    >
+                      {importing ? (
+                        <span className="w-4 h-4 border-2 border-violet-200 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Calendar className="w-4 h-4" />
+                      )}
+                      {importing ? "Importing…" : `Import ${importItems.filter(i => i.selected).length} event${importItems.filter(i => i.selected).length !== 1 ? "s" : ""}`}
+                    </button>
+                    <button onClick={() => setShowImport(false)} className="text-sm font-medium text-zinc-400 hover:text-zinc-600 px-3 py-2 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activities.length === 0 ? (
+            <div className="py-16 text-center bg-white rounded-xl border border-[#E8E6F4]">
+              <CalendarDays className="w-8 h-8 text-zinc-300 mx-auto mb-3" />
+              <p className="text-sm font-medium text-zinc-700 mb-1">No activities this week</p>
+              <p className="text-xs text-zinc-400 mb-4">Import from Google Calendar or log activities manually</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={handleOpenImport}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <Calendar className="w-4 h-4" />
+                  Import from Calendar
+                </button>
+                <Link href="/trainee/activities/new" className="text-sm font-semibold text-zinc-500 hover:text-zinc-700">
+                  + Log manually
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Activities grouped by day */}
+              <div className="space-y-4 mb-5">
+                {grouped.map(({ dayName, acts }) => (
+                  <div key={dayName}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">{dayName}</span>
+                      <span className="text-xs text-zinc-300">{formatDateShort(acts[0].date)}</span>
+                      <div className="flex-1 h-px bg-zinc-100" />
+                      <span className="text-xs text-zinc-400">
+                        {(acts.reduce((s, a) => s + a.duration_minutes, 0) / 60).toFixed(1)}h
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {acts.map((a) => (
+                        <div
+                          key={a.id}
+                          className={cn(
+                            "flex items-center gap-3 bg-white rounded-xl border px-4 py-3.5 transition-all",
+                            a.status === "approved" ? "border-emerald-100 bg-emerald-50/20" :
+                            a.status === "submitted" ? "border-amber-100 bg-amber-50/10" :
+                            "border-[#E8E6F4]"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                            a.status === "approved" ? "bg-emerald-500 border-emerald-500" :
+                            a.status === "submitted" ? "bg-amber-400 border-amber-400" :
+                            "border-zinc-300"
+                          )}>
+                            {(a.status === "approved" || a.status === "submitted") && (
+                              <Check className="w-3.5 h-3.5 text-white" />
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-zinc-900 truncate">{a.title}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span className="text-[11px] text-zinc-400">
+                                {formatTime(a.start_time)} – {formatTime(a.end_time)}
+                              </span>
+                              <span className={cn(
+                                "text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
+                                a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
+                                a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
+                                "bg-blue-50 text-blue-700"
+                              )}>
+                                {a.category}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="text-sm font-semibold text-zinc-600">
+                              {(a.duration_minutes / 60).toFixed(1)}h
+                            </span>
+                            {!isSubmitted && !isApproved && (
+                              <Link
+                                href={`/trainee/activities/${a.id}`}
+                                className="w-7 h-7 rounded-lg hover:bg-zinc-100 flex items-center justify-center text-zinc-400 transition-colors"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </Link>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Summary + submit */}
+              <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
+                <h3 className="text-sm font-semibold text-zinc-900 mb-3">Week summary</h3>
+                <div className="grid grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: "Total", value: totalHours, color: "text-zinc-900" },
+                    { label: "Restricted", value: restrictedHours, color: "text-violet-600" },
+                    { label: "Unrestricted", value: unrestrictedHours, color: "text-blue-600" },
+                    { label: "Supervision", value: supervisionHours, color: "text-emerald-600" },
+                  ].map((s) => (
+                    <div key={s.label} className="text-center">
+                      <p className={cn("text-xl font-bold", s.color)}>{s.value.toFixed(1)}h</p>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {submitError && (
+                  <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5 mb-3">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    {submitError}
+                  </div>
+                )}
+
+                {isApproved ? (
+                  <div className="w-full py-3 rounded-xl text-sm font-semibold text-center bg-emerald-50 text-emerald-700 border border-emerald-100">
+                    <CheckCircle2 className="w-4 h-4 inline mr-1.5" />
+                    Approved by supervisor
+                  </div>
+                ) : isRejected ? (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className="w-full py-3 rounded-xl text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    {submitting ? "Resubmitting…" : "Resubmit for review"}
+                  </button>
+                ) : isSubmitted ? (
+                  <div className="w-full py-3 rounded-xl text-sm font-semibold text-center bg-amber-50 text-amber-700 border border-amber-100">
+                    <Clock className="w-4 h-4 inline mr-1.5" />
+                    Awaiting supervisor review
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting || activities.length === 0}
+                    className={cn(
+                      "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
+                      !submitting && activities.length > 0
+                        ? "bg-violet-600 text-white hover:bg-violet-700"
+                        : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
+                    )}
+                  >
+                    <Send className="w-4 h-4" />
+                    {submitting
+                      ? "Submitting…"
+                      : !supervisorId
+                        ? "No supervisor linked"
+                        : `Submit ${totalHours.toFixed(1)}h to supervisor →`
+                    }
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   )
 }

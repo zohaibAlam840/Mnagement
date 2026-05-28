@@ -1,30 +1,114 @@
 "use client"
 
-import { useState, use } from "react"
+import { useState, useEffect, use } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   ChevronLeft, CheckCircle2, Clock, Pencil, Trash2,
   Save, X, AlertTriangle, User, Calendar, AlarmClock
 } from "lucide-react"
-import { activities } from "@/lib/mock-data"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import type { Database } from "@/lib/supabase/types"
+
+type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
+
+function formatDate(d: string) {
+  return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+function formatTime(t: string) {
+  const [h, m] = t.split(":")
+  const hr = parseInt(h)
+  return `${hr % 12 || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`
+}
 
 export default function ActivityDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const activity = activities.find((a) => a.id === id) ?? activities[0]
+  const router = useRouter()
+
+  const [activity, setActivity] = useState<ActivityRow | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState(activity.title)
-  const [notes, setNotes] = useState(activity.notes)
-  const [category, setCategory] = useState(activity.category)
-  const [duration, setDuration] = useState(activity.duration)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Editable fields
+  const [title, setTitle] = useState("")
+  const [notes, setNotes] = useState("")
+  const [category, setCategory] = useState<ActivityRow["category"]>("Restricted")
+
+  useEffect(() => {
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase
+        .from("activities")
+        .select("*")
+        .eq("id", id)
+        .eq("trainee_id", user.id)
+        .single()
+
+      if (!data) { setNotFound(true); setLoading(false); return }
+      setActivity(data)
+      setTitle(data.title)
+      setNotes(data.notes ?? "")
+      setCategory(data.category)
+      setLoading(false)
+    }
+    load()
+  }, [id])
+
+  const handleSave = async () => {
+    if (!activity) return
+    setSaving(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from("activities")
+      .update({ title, notes: notes || null, category })
+      .eq("id", activity.id)
+      .select()
+      .single()
+    if (data) setActivity(data)
+    setSaving(false)
+    setEditing(false)
+  }
+
+  const handleDelete = async () => {
+    if (!activity) return
+    if (!confirm("Delete this activity? This cannot be undone.")) return
+    setDeleting(true)
+    const supabase = createClient()
+    await supabase.from("activities").delete().eq("id", activity.id)
+    router.push("/trainee/activities")
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-7 max-w-2xl mx-auto flex items-center justify-center min-h-[50vh]">
+        <div className="w-6 h-6 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (notFound || !activity) {
+    return (
+      <div className="p-4 md:p-7 max-w-2xl mx-auto text-center py-20">
+        <p className="text-zinc-400 mb-4">Activity not found.</p>
+        <Link href="/trainee/activities" className="text-sm font-semibold text-violet-600 hover:text-violet-700">
+          ← Back to activities
+        </Link>
+      </div>
+    )
+  }
+
+  const durationHours = activity.duration_minutes / 60
 
   return (
     <div className="p-4 md:p-7 max-w-2xl mx-auto">
-      {/* Back */}
-      <Link
-        href="/trainee/activities"
-        className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors"
-      >
+      <Link href="/trainee/activities" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
         <ChevronLeft className="w-4 h-4" /> Activities
       </Link>
 
@@ -38,11 +122,11 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
               className="w-full text-xl font-bold text-zinc-900 bg-transparent border-b-2 border-violet-400 focus:outline-none pb-1"
             />
           ) : (
-            <h1 className="text-xl md:text-2xl font-bold text-zinc-900">{title}</h1>
+            <h1 className="text-xl md:text-2xl font-bold text-zinc-900">{activity.title}</h1>
           )}
-          {activity.client && (
+          {activity.client_name && (
             <p className="text-sm text-zinc-500 mt-1 flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5" /> {activity.client}
+              <User className="w-3.5 h-3.5" /> {activity.client_name}
             </p>
           )}
         </div>
@@ -50,14 +134,15 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
           {editing ? (
             <>
               <button
-                onClick={() => setEditing(false)}
+                onClick={() => { setEditing(false); setTitle(activity.title); setNotes(activity.notes ?? ""); setCategory(activity.category) }}
                 className="w-9 h-9 rounded-lg border border-zinc-200 flex items-center justify-center text-zinc-500 hover:bg-zinc-50 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setEditing(false)}
-                className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center text-white hover:bg-violet-700 transition-colors"
+                onClick={handleSave}
+                disabled={saving}
+                className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center text-white hover:bg-violet-700 transition-colors disabled:opacity-60"
               >
                 <Save className="w-4 h-4" />
               </button>
@@ -70,7 +155,11 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
               >
                 <Pencil className="w-4 h-4" />
               </button>
-              <button className="w-9 h-9 rounded-lg border border-red-100 bg-red-50 flex items-center justify-center text-red-400 hover:bg-red-100 transition-colors">
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="w-9 h-9 rounded-lg border border-red-100 bg-red-50 flex items-center justify-center text-red-400 hover:bg-red-100 transition-colors disabled:opacity-60"
+              >
                 <Trash2 className="w-4 h-4" />
               </button>
             </>
@@ -78,81 +167,56 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
-      {/* Status badge */}
+      {/* Status badges */}
       <div className="flex items-center gap-2 mb-5">
         <span className={cn(
-          "flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full",
-          activity.category === "Restricted" ? "bg-violet-50 text-violet-700 border border-violet-100" :
-          activity.category === "Supervision" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
-          "bg-blue-50 text-blue-700 border border-blue-100"
+          "flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border",
+          activity.category === "Restricted" ? "bg-violet-50 text-violet-700 border-violet-100" :
+          activity.category === "Supervision" ? "bg-emerald-50 text-emerald-700 border-emerald-100" :
+          "bg-blue-50 text-blue-700 border-blue-100"
         )}>
-          {activity.category}
+          {editing ? (
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as ActivityRow["category"])}
+              className="bg-transparent focus:outline-none text-xs font-semibold"
+            >
+              <option>Restricted</option>
+              <option>Unrestricted</option>
+              <option>Supervision</option>
+            </select>
+          ) : activity.category}
         </span>
         <span className={cn(
-          "flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full",
-          activity.status === "confirmed" ? "bg-emerald-50 text-emerald-700" :
-          activity.status === "pending" ? "bg-amber-50 text-amber-700" :
-          "bg-red-50 text-red-700"
+          "text-xs font-semibold px-3 py-1.5 rounded-full",
+          activity.status === "approved" ? "bg-emerald-50 text-emerald-700" :
+          activity.status === "submitted" ? "bg-amber-50 text-amber-700" :
+          activity.status === "rejected" ? "bg-red-50 text-red-700" :
+          "bg-zinc-50 text-zinc-500"
         )}>
-          {activity.status}
+          {activity.status === "submitted" ? "Pending" :
+           activity.status === "approved" ? "Approved" :
+           activity.status === "rejected" ? "Rejected" : "Draft"}
         </span>
-        {activity.supervisorApproved
-          ? <span className="flex items-center gap-1 text-xs font-medium text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /> Approved</span>
-          : <span className="flex items-center gap-1 text-xs font-medium text-zinc-400"><Clock className="w-3.5 h-3.5" /> Pending approval</span>
-        }
+        {activity.status === "approved" && (
+          <span className="flex items-center gap-1 text-xs font-medium text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /> Approved</span>
+        )}
+        {activity.status === "submitted" && (
+          <span className="flex items-center gap-1 text-xs font-medium text-amber-500"><Clock className="w-3.5 h-3.5" /> Pending approval</span>
+        )}
       </div>
 
       {/* Details card */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] divide-y divide-zinc-50 mb-4">
         {[
-          {
-            icon: <Calendar className="w-4 h-4 text-zinc-400" />,
-            label: "Date",
-            value: activity.date,
-          },
-          {
-            icon: <AlarmClock className="w-4 h-4 text-zinc-400" />,
-            label: "Time",
-            value: `${activity.startTime} – ${activity.endTime}`,
-          },
-          {
-            icon: <Clock className="w-4 h-4 text-zinc-400" />,
-            label: "Duration",
-            value: editing ? (
-              <input
-                type="number"
-                step="0.5"
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-20 text-sm font-semibold text-right bg-transparent border-b border-violet-400 focus:outline-none"
-              />
-            ) : `${duration} hours`,
-          },
-          {
-            icon: <div className={cn("w-3 h-3 rounded-full", activity.category === "Restricted" ? "bg-violet-500" : activity.category === "Supervision" ? "bg-emerald-500" : "bg-blue-500")} />,
-            label: "Category",
-            value: editing ? (
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as typeof category)}
-                className="text-sm font-semibold bg-transparent border-b border-violet-400 focus:outline-none"
-              >
-                <option>Restricted</option>
-                <option>Unrestricted</option>
-                <option>Supervision</option>
-              </select>
-            ) : category,
-          },
-          {
-            icon: null,
-            label: "Subcategory",
-            value: activity.subcategory,
-          },
+          { icon: <Calendar className="w-4 h-4 text-zinc-400" />, label: "Date", value: formatDate(activity.date) },
+          { icon: <AlarmClock className="w-4 h-4 text-zinc-400" />, label: "Time", value: `${formatTime(activity.start_time)} – ${formatTime(activity.end_time)}` },
+          { icon: <Clock className="w-4 h-4 text-zinc-400" />, label: "Duration", value: `${durationHours.toFixed(1)} hours` },
+          { icon: <div className={cn("w-3 h-3 rounded-full", activity.category === "Restricted" ? "bg-violet-500" : activity.category === "Supervision" ? "bg-emerald-500" : "bg-blue-500")} />, label: "Category", value: activity.category },
+          { icon: null, label: "Subcategory", value: activity.subcategory ?? "—" },
         ].map((row, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-3.5">
-            <div className="w-5 flex items-center justify-center flex-shrink-0">
-              {row.icon}
-            </div>
+            <div className="w-5 flex items-center justify-center flex-shrink-0">{row.icon}</div>
             <span className="text-sm text-zinc-500 w-28 flex-shrink-0">{row.label}</span>
             <span className="text-sm font-semibold text-zinc-900 flex-1 text-right">{row.value}</span>
           </div>
@@ -164,21 +228,24 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
         <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Flags</p>
         <div className="flex flex-wrap gap-2">
           {[
-            { label: "Supervision-related", active: activity.supervisionRelated },
-            { label: "Direct observation", active: activity.directObservation },
+            { label: "Supervision-related", active: activity.supervision_present },
+            { label: "Direct observation", active: activity.observation_with_client },
           ].map((flag) => (
             <span
               key={flag.label}
               className={cn(
                 "text-xs font-semibold px-3 py-1.5 rounded-full border",
-                flag.active
-                  ? "bg-violet-50 text-violet-700 border-violet-100"
-                  : "bg-zinc-50 text-zinc-400 border-zinc-100"
+                flag.active ? "bg-violet-50 text-violet-700 border-violet-100" : "bg-zinc-50 text-zinc-400 border-zinc-100"
               )}
             >
               {flag.active ? "✓" : "–"} {flag.label}
             </span>
           ))}
+          {activity.observation_with_client && activity.observation_duration_minutes > 0 && (
+            <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
+              {activity.observation_duration_minutes} min observation
+            </span>
+          )}
         </div>
       </div>
 
@@ -195,7 +262,7 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
           />
         ) : (
           <p className="text-sm text-zinc-600 leading-relaxed">
-            {notes || <span className="text-zinc-300 italic">No notes added</span>}
+            {activity.notes || <span className="text-zinc-300 italic">No notes added</span>}
           </p>
         )}
       </div>
@@ -204,27 +271,39 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-4">
         <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Audit Trail</p>
         <div className="space-y-3">
-          {[
-            { action: "Activity created", by: "Sarah Mitchell", time: `${activity.date} · ${activity.startTime}`, icon: <div className="w-2 h-2 rounded-full bg-zinc-300" /> },
-            { action: "Marked as confirmed", by: "Sarah Mitchell", time: `${activity.date} · ${activity.endTime}`, icon: <div className="w-2 h-2 rounded-full bg-violet-400" /> },
-            ...(activity.supervisorApproved ? [{ action: "Approved by supervisor", by: "Dr. Emily Rodriguez", time: "1 day later", icon: <CheckCircle2 className="w-3 h-3 text-emerald-500" /> }] : []),
-          ].map((entry, i) => (
-            <div key={i} className="flex items-start gap-3">
-              <div className="w-4 flex items-center justify-center mt-1 flex-shrink-0">{entry.icon}</div>
+          <div className="flex items-start gap-3">
+            <div className="w-4 flex items-center justify-center mt-1 flex-shrink-0">
+              <div className="w-2 h-2 rounded-full bg-zinc-300" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-zinc-800">Activity created</p>
+              <p className="text-xs text-zinc-400">{formatDate(activity.created_at.split("T")[0])}</p>
+            </div>
+          </div>
+          {activity.status === "approved" && (
+            <div className="flex items-start gap-3">
+              <div className="w-4 flex items-center justify-center mt-1 flex-shrink-0">
+                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-zinc-800">{entry.action}</p>
-                <p className="text-xs text-zinc-400">{entry.by} · {entry.time}</p>
+                <p className="text-sm font-medium text-zinc-800">Approved by supervisor</p>
+                <p className="text-xs text-zinc-400">{formatDate(activity.updated_at.split("T")[0])}</p>
               </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
 
-      {/* Warning if pending */}
-      {!activity.supervisorApproved && (
+      {activity.status === "submitted" && (
         <div className="mt-4 flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-800">
           <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          This activity is awaiting approval from Dr. Rodriguez.
+          This activity has been submitted and is awaiting approval from your supervisor.
+        </div>
+      )}
+      {activity.status === "draft" && (
+        <div className="mt-4 flex items-start gap-3 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm text-zinc-600">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          This activity is a draft. Go to <Link href="/trainee/weekly-review" className="font-semibold text-violet-600 hover:text-violet-700 mx-1">Weekly Review</Link> to submit it to your supervisor.
         </div>
       )}
     </div>

@@ -13,13 +13,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FieldLog — BACB Fieldwork Tracker",
+  title: "ABA Fieldwork Pro — BACB Fieldwork Tracker",
   description: "Track BACB fieldwork hours, compliance ratios, and supervisor approvals automatically.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "FieldLog",
+    title: "ABA Fieldwork Pro",
     startupImage: "/apple-touch-icon.png",
   },
   icons: {

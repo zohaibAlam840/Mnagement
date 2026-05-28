@@ -2,27 +2,37 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, Mail, ClipboardList, CheckCircle2 } from "lucide-react"
+import { ChevronLeft, Mail, ClipboardList, CheckCircle2, AlertCircle } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("")
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email) return
+    setError("")
     setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
-      setSent(true)
-    }, 900)
+
+    const supabase = createClient()
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    })
+
+    setLoading(false)
+    if (resetError) {
+      setError(resetError.message)
+      return
+    }
+    setSent(true)
   }
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--background, #F7F6FF)" }}>
-      {/* Top bar */}
       <div className="px-6 py-5 flex items-center justify-between">
         <Link href="/login" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 transition-colors">
           <ChevronLeft className="w-4 h-4" /> Back to login
@@ -31,7 +41,7 @@ export default function ForgotPasswordPage() {
           <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center">
             <ClipboardList className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="font-bold text-zinc-900 text-sm">FieldLog</span>
+          <span className="font-bold text-zinc-900 text-sm">ABA Fieldwork Pro</span>
         </div>
       </div>
 
@@ -43,9 +53,7 @@ export default function ForgotPasswordPage() {
                 <CheckCircle2 className="w-8 h-8 text-emerald-600" />
               </div>
               <h1 className="text-2xl font-bold text-zinc-900 mb-2">Check your email</h1>
-              <p className="text-sm text-zinc-500 mb-1">
-                We sent a password reset link to
-              </p>
+              <p className="text-sm text-zinc-500 mb-1">We sent a password reset link to</p>
               <p className="text-sm font-semibold text-zinc-800 mb-6">{email}</p>
               <p className="text-xs text-zinc-400 mb-8">
                 Didn&apos;t get it? Check your spam folder or{" "}
@@ -68,7 +76,7 @@ export default function ForgotPasswordPage() {
                 </div>
                 <h1 className="text-2xl font-bold text-zinc-900 mb-2">Forgot your password?</h1>
                 <p className="text-sm text-zinc-500">
-                  Enter the email address on your FieldLog account and we&apos;ll send you a link to reset your password.
+                  Enter the email on your ABA Fieldwork Pro account and we&apos;ll send a reset link.
                 </p>
               </div>
 
@@ -84,6 +92,14 @@ export default function ForgotPasswordPage() {
                     className="w-full px-4 py-3 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
                   />
                 </div>
+
+                {error && (
+                  <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {error}
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={!email || loading}
@@ -94,15 +110,13 @@ export default function ForgotPasswordPage() {
                       : "bg-zinc-200 text-zinc-400 cursor-not-allowed"
                   )}
                 >
-                  {loading ? "Sending..." : "Send reset link"}
+                  {loading ? "Sending…" : "Send reset link"}
                 </button>
               </form>
 
               <p className="text-center text-xs text-zinc-400 mt-6">
                 Remembered it?{" "}
-                <Link href="/login" className="text-violet-600 hover:text-violet-700 font-medium">
-                  Sign in
-                </Link>
+                <Link href="/login" className="text-violet-600 hover:text-violet-700 font-medium">Sign in</Link>
               </p>
             </>
           )}

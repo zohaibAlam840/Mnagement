@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -16,27 +17,33 @@ import {
   Bell,
   ClipboardList,
   ChevronRight,
+  UserCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { SignOutButton } from "@/components/auth/SignOutButton"
+import { createClient } from "@/lib/supabase/client"
 
-const traineeNav = [
+type NavItem = { label: string; icon: React.ElementType; href: string; badge?: string }
+
+const traineeNav: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/trainee" },
   { label: "Activities", icon: Activity, href: "/trainee/activities" },
   { label: "Templates", icon: Repeat2, href: "/trainee/templates" },
-  { label: "Weekly Review", icon: CalendarCheck, href: "/trainee/weekly-review", badge: "3" },
+  { label: "Weekly Review", icon: CalendarCheck, href: "/trainee/weekly-review" },
+  { label: "My Supervisor", icon: UserCheck, href: "/trainee/supervisor" },
   { label: "Reports", icon: FileText, href: "/trainee/reports" },
 ]
 
-const supervisorNav = [
+const supervisorNavBase: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/supervisor" },
   { label: "Supervisees", icon: Users, href: "/supervisor/supervisees" },
-  { label: "Approvals", icon: CheckSquare, href: "/supervisor/approvals", badge: "3" },
+  { label: "Approvals", icon: CheckSquare, href: "/supervisor/approvals" },
   { label: "Sessions", icon: Video, href: "/supervisor/sessions" },
   { label: "Sign-Off", icon: FileText, href: "/supervisor/sign-off" },
 ]
 
-const bottomNav = [
-  { label: "Notifications", icon: Bell, href: "/notifications", badge: "3" },
+const bottomNavBase: NavItem[] = [
+  { label: "Notifications", icon: Bell, href: "/notifications" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ]
 
@@ -44,10 +51,51 @@ export function Sidebar() {
   const pathname = usePathname()
   const isTrainee = pathname.startsWith("/trainee")
   const isSupervisor = pathname.startsWith("/supervisor")
-  const navItems = isSupervisor ? supervisorNav : traineeNav
+
+  const [userName, setUserName] = useState("")
+  const [userRole, setUserRole] = useState("")
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [pendingApprovals, setPendingApprovals] = useState(0)
+
+  useEffect(() => {
+    async function loadUser() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const [profileRes, unreadRes, approvalsRes] = await Promise.all([
+        supabase.from("profiles").select("first_name, last_name, role").eq("id", user.id).single(),
+        supabase.from("notifications").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("read", false),
+        supabase.from("weekly_reviews").select("*", { count: "exact", head: true }).eq("supervisor_id", user.id).eq("status", "submitted"),
+      ])
+
+      const profile = profileRes.data as { first_name: string; last_name: string; role: string } | null
+      if (profile) {
+        setUserName(`${profile.first_name} ${profile.last_name}`)
+        setUserRole(profile.role)
+      }
+      setUnreadCount((unreadRes as { count: number | null }).count ?? 0)
+      setPendingApprovals((approvalsRes as { count: number | null }).count ?? 0)
+    }
+    loadUser()
+  }, [pathname])
+
+  const supervisorNav = supervisorNavBase.map((item) =>
+    item.href === "/supervisor/approvals" && pendingApprovals > 0
+      ? { ...item, badge: String(pendingApprovals) }
+      : item
+  )
+  const bottomNav = bottomNavBase.map((item) =>
+    item.href === "/notifications" && unreadCount > 0
+      ? { ...item, badge: String(unreadCount) }
+      : item
+  )
+
+  const showSupervisorNav = isSupervisor || (!isTrainee && userRole === "supervisor")
+  const navItems = showSupervisorNav ? supervisorNav : traineeNav
 
   return (
-    <aside className="hidden md:flex flex-col fixed left-0 top-0 bottom-0 w-[240px] z-40"
+    <aside className="hidden md:flex print:hidden flex-col fixed left-0 top-0 bottom-0 w-[240px] z-40"
       style={{ backgroundColor: "var(--sidebar)" }}>
 
       {/* Logo */}
@@ -55,39 +103,13 @@ export function Sidebar() {
         <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
           <ClipboardList className="w-4 h-4 text-white" />
         </div>
-        <span className="text-white font-semibold text-[15px] tracking-tight">FieldLog</span>
-      </div>
-
-      {/* Role switcher (demo only) */}
-      <div className="mx-4 mt-4 mb-1 flex rounded-lg overflow-hidden border border-white/10 text-xs font-medium">
-        <Link
-          href="/trainee"
-          className={cn(
-            "flex-1 text-center py-1.5 transition-colors",
-            isTrainee
-              ? "bg-violet-600 text-white"
-              : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          Trainee
-        </Link>
-        <Link
-          href="/supervisor"
-          className={cn(
-            "flex-1 text-center py-1.5 transition-colors",
-            isSupervisor
-              ? "bg-violet-600 text-white"
-              : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          Supervisor
-        </Link>
+        <span className="text-white font-semibold text-[15px] tracking-tight">ABA Fieldwork Pro</span>
       </div>
 
       {/* Nav items */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto">
         <p className="text-[10px] font-semibold tracking-widest uppercase text-zinc-600 px-2 mb-2">
-          {isSupervisor ? "Supervisor" : "My Fieldwork"}
+          {showSupervisorNav ? "Supervisor" : "My Fieldwork"}
         </p>
         <ul className="space-y-0.5">
           {navItems.map((item) => {
@@ -137,7 +159,12 @@ export function Sidebar() {
                   )}
                 >
                   <item.icon className="w-4 h-4 flex-shrink-0 text-zinc-500 group-hover:text-zinc-300" />
-                  <span>{item.label}</span>
+                  <span className="flex-1 leading-none">{item.label}</span>
+                  {"badge" in item && item.badge && (
+                    <span className="text-[10px] font-semibold bg-violet-500 text-white rounded-full w-4 h-4 flex items-center justify-center">
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               </li>
             )
@@ -150,20 +177,20 @@ export function Sidebar() {
         <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/5 border border-white/5">
           <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-semibold">
-              {isSupervisor ? "ER" : "SM"}
+              {userName ? `${userName.split(" ")[0][0]}${userName.split(" ")[1]?.[0] ?? ""}`.toUpperCase() : "…"}
             </span>
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white text-xs font-medium truncate">
-              {isSupervisor ? "Dr. Emily Rodriguez" : "Sarah Mitchell"}
+              {userName || "Loading…"}
             </p>
-            <p className="text-zinc-500 text-[10px] truncate">
-              {isSupervisor ? "BCBA-D · Supervisor" : "BCBA Trainee"}
+            <p className="text-zinc-500 text-[10px] truncate capitalize">
+              {userRole || (isSupervisor ? "Supervisor" : "Trainee")}
             </p>
           </div>
-          <Link href="/login" className="text-zinc-600 hover:text-zinc-400 transition-colors">
+          <SignOutButton className="text-zinc-600 hover:text-zinc-400 transition-colors">
             <LogOut className="w-3.5 h-3.5" />
-          </Link>
+          </SignOutButton>
         </div>
       </div>
     </aside>
