@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ClipboardList, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react"
+import Image from "next/image"
+import { Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
@@ -34,11 +35,16 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen bg-[#F7F6FF] flex flex-col items-center justify-center px-4">
-      <div className="flex items-center gap-2.5 mb-10">
-        <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center">
-          <ClipboardList className="w-5 h-5 text-white" />
+      <div className="mb-10">
+        <div className="h-10 bg-violet-600 rounded-xl px-3 flex items-center">
+          <Image
+            src="/WhatsApp_Image_2026-05-28_at_12.32.44__2_-removebg-preview.png"
+            alt="ABA Fieldwork Pro"
+            width={140}
+            height={28}
+            className="h-7 w-auto object-contain"
+          />
         </div>
-        <span className="font-bold text-zinc-900 text-lg tracking-tight">ABA Fieldwork Pro</span>
       </div>
 
       <div className="w-full max-w-[360px] bg-white rounded-2xl border border-[#E8E6F4] p-8 shadow-sm">

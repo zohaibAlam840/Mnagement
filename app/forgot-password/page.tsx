@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, Mail, ClipboardList, CheckCircle2, AlertCircle } from "lucide-react"
+import Image from "next/image"
+import { ChevronLeft, Mail, CheckCircle2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
@@ -37,11 +38,14 @@ export default function ForgotPasswordPage() {
         <Link href="/login" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 transition-colors">
           <ChevronLeft className="w-4 h-4" /> Back to login
         </Link>
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center">
-            <ClipboardList className="w-3.5 h-3.5 text-white" />
-          </div>
-          <span className="font-bold text-zinc-900 text-sm">ABA Fieldwork Pro</span>
+        <div className="h-8 bg-violet-600 rounded-xl px-2.5 flex items-center">
+          <Image
+            src="/WhatsApp_Image_2026-05-28_at_12.32.44__2_-removebg-preview.png"
+            alt="ABA Fieldwork Pro"
+            width={120}
+            height={24}
+            className="h-6 w-auto object-contain"
+          />
         </div>
       </div>
 

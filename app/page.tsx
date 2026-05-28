@@ -1,16 +1,20 @@
+import Image from "next/image"
 import Link from "next/link"
-import { ClipboardList, ArrowRight, CheckCircle2 } from "lucide-react"
+import { ArrowRight, CheckCircle2 } from "lucide-react"
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Nav */}
       <header className="flex items-center justify-between px-6 md:px-12 h-16 border-b border-zinc-100 sticky top-0 bg-white/90 backdrop-blur z-10">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center">
-            <ClipboardList className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-semibold text-zinc-900 tracking-tight">ABA Fieldwork Pro</span>
+        <div className="h-9 bg-violet-600 rounded-xl px-3 flex items-center">
+          <Image
+            src="/WhatsApp_Image_2026-05-28_at_12.32.44__2_-removebg-preview.png"
+            alt="ABA Fieldwork Pro"
+            width={140}
+            height={28}
+            className="h-7 w-auto object-contain"
+          />
         </div>
         <div className="flex items-center gap-3">
           <Link href="/login" className="text-sm text-zinc-500 hover:text-zinc-900 transition-colors font-medium">

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -99,11 +100,14 @@ export function Sidebar() {
       style={{ backgroundColor: "var(--sidebar)" }}>
 
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/5">
-        <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
-          <ClipboardList className="w-4 h-4 text-white" />
-        </div>
-        <span className="text-white font-semibold text-[15px] tracking-tight">ABA Fieldwork Pro</span>
+      <div className="flex items-center px-5 h-16 border-b border-white/5">
+        <Image
+          src="/WhatsApp_Image_2026-05-28_at_12.32.44__2_-removebg-preview.png"
+          alt="ABA Fieldwork Pro"
+          width={160}
+          height={40}
+          className="h-10 w-auto object-contain"
+        />
       </div>
 
       {/* Nav items */}
