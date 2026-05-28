@@ -12,7 +12,7 @@ import type { Database } from "@/lib/supabase/types"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
-type ActivityCategory = Database["public"]["Enums"] extends { activity_category: infer E } ? E : "Restricted" | "Unrestricted" | "Supervision"
+type ActivityCategory = "Restricted" | "Unrestricted" | "Supervision"
 
 type GCalEvent = {
   id: string
