@@ -169,7 +169,10 @@ export default function LandingPage() {
       </section>
 
       <footer className="px-6 py-6 border-t border-zinc-100 text-center">
-        <p className="text-xs text-zinc-400">© 2025 ABA Fieldwork Pro · Built for BCBA fieldwork tracking</p>
+        <p className="text-xs text-zinc-400">© 2026 ABA Fieldwork Pro · Built for BCBA fieldwork tracking</p>
+        <div className="flex items-center justify-center gap-4 mt-2">
+          <Link href="/privacy" className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">Privacy Policy</Link>
+        </div>
       </footer>
     </div>
   )
