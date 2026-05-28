@@ -12,6 +12,7 @@
   --green: #10B981;
   --yellow: #F59E0B;
   --red: #EF4444;
+  --red2: #EF4443;
 }
 
 @theme inline {
@@ -41,9 +42,11 @@ body {
   width: 4px;
   height: 4px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #d1d5db;
   border-radius: 999px;
@@ -53,6 +56,7 @@ body {
 .safe-top {
   padding-top: env(safe-area-inset-top);
 }
+
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
 }
