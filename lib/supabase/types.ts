@@ -102,7 +102,9 @@ export interface Database {
           client_name: string | null
           observation_with_client: boolean
           observation_duration_minutes: number
+          observation_type: "direct" | "remote" | "indirect" | null
           supervision_present: boolean
+          session_type: "individual" | "group" | null
           notes: string | null
           status: ActivityStatus
           week_start_date: string

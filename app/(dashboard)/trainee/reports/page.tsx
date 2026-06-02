@@ -105,8 +105,8 @@ export default function ReportsPage() {
   return (
     <div className="p-4 md:p-7 max-w-3xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Reports</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">Monthly BACB verification summaries</p>
+        <h1 className="text-xl md:text-2xl font-bold text-zinc-900">MSP Reports</h1>
+        <p className="text-sm text-zinc-500 mt-0.5">Monthly Supervisory Period (MSP) compliance records — the BACB compliance unit</p>
       </div>
 
       {/* Total stat */}
@@ -133,7 +133,7 @@ export default function ReportsPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-sm font-semibold text-zinc-900">{currentMonthLabel}</p>
-              <p className="text-xs text-zinc-400">{liveMonth.actCount} activities logged · live data</p>
+              <p className="text-xs text-zinc-400">Current MSP · {liveMonth.actCount} activities logged · live data</p>
             </div>
             <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full border border-violet-100">In progress</span>
           </div>
@@ -174,7 +174,7 @@ export default function ReportsPage() {
         <div className="bg-white rounded-xl border border-[#E8E6F4] py-16 text-center">
           <FileText className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
           <p className="text-sm font-medium text-zinc-700 mb-1">No reports yet</p>
-          <p className="text-xs text-zinc-400">Monthly summaries appear here once your supervisor generates them.</p>
+          <p className="text-xs text-zinc-400">MSP records appear here once your supervisor generates your Monthly Supervisory Period report.</p>
         </div>
       ) : (
         <div className="space-y-3">

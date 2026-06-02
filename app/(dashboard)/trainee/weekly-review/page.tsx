@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import {
   ChevronLeft, ChevronRight, Check, Pencil, CalendarDays,
-  AlertTriangle, CheckCircle2, Clock, Send, RotateCcw, Calendar, X
+  AlertTriangle, CheckCircle2, Clock, Send, RotateCcw, Calendar, X, Repeat2
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -12,7 +12,14 @@ import type { Database } from "@/lib/supabase/types"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
+type TemplateRow = Database["public"]["Tables"]["activity_templates"]["Row"]
 type ActivityCategory = "Restricted" | "Unrestricted" | "Supervision"
+
+type TemplateItem = {
+  template: TemplateRow
+  date: string
+  selected: boolean
+}
 
 type GCalEvent = {
   id: string
@@ -97,6 +104,13 @@ export default function WeeklyReviewPage() {
   const [importError, setImportError] = useState("")
   const [importing, setImporting] = useState(false)
   const [importSuccess, setImportSuccess] = useState(0)
+
+  // Template generation state
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [templateItems, setTemplateItems] = useState<TemplateItem[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [generatingFromTemplates, setGeneratingFromTemplates] = useState(false)
+  const [templateGenSuccess, setTemplateGenSuccess] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -229,6 +243,100 @@ export default function WeeklyReviewPage() {
     setImporting(false)
   }
 
+  const handleOpenTemplates = async () => {
+    setShowTemplates(true)
+    setTemplateItems([])
+    setTemplateGenSuccess(0)
+    setTemplatesLoading(true)
+
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setTemplatesLoading(false); return }
+
+    const { data: templates } = await supabase
+      .from("activity_templates")
+      .select("*")
+      .eq("trainee_id", user.id)
+      .eq("active", true)
+
+    if (!templates || templates.length === 0) {
+      setTemplatesLoading(false)
+      return
+    }
+
+    // Map week day names to actual dates for the displayed week
+    const dayToDate: Record<string, string> = {}
+    WEEK_DAYS.forEach((day, i) => {
+      const d = new Date(weekStart + "T00:00:00")
+      d.setDate(d.getDate() + i)
+      dayToDate[day] = toLocalDateStr(d)
+    })
+
+    // Explode templates into one item per matching day, skip days that already have an activity from this template
+    const existingDates = new Set(activities.map(a => a.date))
+
+    const items: TemplateItem[] = []
+    for (const template of templates as TemplateRow[]) {
+      for (const day of template.days) {
+        const date = dayToDate[day]
+        if (!date) continue
+        // Skip if there's already an activity on this date with the same title (avoid duplicates)
+        const alreadyExists = activities.some(
+          a => a.date === date && a.title === template.title
+        )
+        if (alreadyExists) continue
+        items.push({ template, date, selected: true })
+      }
+    }
+
+    // Sort by date then start_time
+    items.sort((a, b) => a.date.localeCompare(b.date) || a.template.start_time.localeCompare(b.template.start_time))
+    setTemplateItems(items)
+    setTemplatesLoading(false)
+  }
+
+  const handleGenerateFromTemplates = async () => {
+    const selected = templateItems.filter(i => i.selected)
+    if (selected.length === 0) return
+
+    setGeneratingFromTemplates(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const toInsert = selected.map(({ template, date }) => {
+      const [sh, sm] = template.start_time.split(":").map(Number)
+      const [eh, em] = template.end_time.split(":").map(Number)
+      const durationMins = Math.max(0, (eh * 60 + em) - (sh * 60 + sm))
+      return {
+        trainee_id: user.id,
+        template_id: template.id,
+        title: template.title,
+        date,
+        start_time: template.start_time,
+        end_time: template.end_time,
+        duration_minutes: durationMins,
+        category: template.category as ActivityCategory,
+        subcategory: template.subcategory,
+        client_name: template.client_name,
+        notes: template.notes,
+        observation_with_client: false,
+        observation_duration_minutes: 0,
+        supervision_present: template.category === "Supervision",
+        status: "draft" as const,
+        week_start_date: weekStart,
+      }
+    })
+
+    const { error } = await supabase.from("activities").insert(toInsert)
+    if (!error) {
+      setTemplateGenSuccess(selected.length)
+      setShowTemplates(false)
+      await load()
+    }
+    setGeneratingFromTemplates(false)
+  }
+
   const handleSubmit = async () => {
     if (!supervisorId) {
       setSubmitError("No active supervisor linked. Ask your supervisor to connect with you first.")
@@ -331,16 +439,25 @@ export default function WeeklyReviewPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Weekly Review</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Review and submit your week to your supervisor</p>
+          <p className="text-sm text-zinc-500 mt-0.5">Weekly submissions build your Monthly Supervisory Period (MSP)</p>
         </div>
         {canImport && (
-          <button
-            onClick={handleOpenImport}
-            className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-100 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            Import from Calendar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleOpenTemplates}
+              className="flex items-center gap-1.5 text-xs font-semibold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <Repeat2 className="w-3.5 h-3.5" />
+              From Templates
+            </button>
+            <button
+              onClick={handleOpenImport}
+              className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-100 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              Import from Calendar
+            </button>
+          </div>
         )}
       </div>
 
@@ -411,6 +528,107 @@ export default function WeeklyReviewPage() {
             <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-5">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <p className="text-sm text-emerald-800">{importSuccess} event{importSuccess > 1 ? "s" : ""} imported from Google Calendar as draft activities.</p>
+            </div>
+          )}
+          {templateGenSuccess > 0 && (
+            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <p className="text-sm text-emerald-800">{templateGenSuccess} activit{templateGenSuccess > 1 ? "ies" : "y"} generated from templates.</p>
+            </div>
+          )}
+
+          {/* Template generation panel */}
+          {showTemplates && (
+            <div className="bg-white rounded-xl border border-zinc-200 mb-5 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-zinc-50">
+                <div className="flex items-center gap-2">
+                  <Repeat2 className="w-4 h-4 text-zinc-600" />
+                  <p className="text-sm font-semibold text-zinc-800">Generate from Templates</p>
+                </div>
+                <button onClick={() => setShowTemplates(false)} className="text-zinc-400 hover:text-zinc-600 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {templatesLoading ? (
+                <div className="py-10 flex items-center justify-center gap-2 text-sm text-zinc-400">
+                  <div className="w-4 h-4 border-2 border-zinc-200 border-t-zinc-500 rounded-full animate-spin" />
+                  Loading templates…
+                </div>
+              ) : templateItems.length === 0 ? (
+                <div className="py-10 text-center">
+                  <Repeat2 className="w-7 h-7 text-zinc-300 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-zinc-600 mb-1">No activities to generate</p>
+                  <p className="text-xs text-zinc-400">
+                    Either you have no active templates, or all template activities already exist this week.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="divide-y divide-zinc-50">
+                    <div className="flex items-center justify-between px-5 py-2.5">
+                      <p className="text-xs text-zinc-400">{templateItems.filter(i => i.selected).length} of {templateItems.length} selected</p>
+                      <button
+                        onClick={() => {
+                          const allSelected = templateItems.every(i => i.selected)
+                          setTemplateItems(prev => prev.map(i => ({ ...i, selected: !allSelected })))
+                        }}
+                        className="text-xs font-semibold text-violet-600 hover:text-violet-700"
+                      >
+                        {templateItems.every(i => i.selected) ? "Deselect all" : "Select all"}
+                      </button>
+                    </div>
+                    {templateItems.map((item, idx) => (
+                      <button
+                        key={`${item.template.id}-${item.date}`}
+                        onClick={() => setTemplateItems(prev => prev.map((x, i) => i === idx ? { ...x, selected: !x.selected } : x))}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-5 py-3 text-left transition-colors",
+                          item.selected ? "bg-zinc-50" : "bg-white opacity-50"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0",
+                          item.selected ? "bg-violet-600 border-violet-600" : "border-zinc-300"
+                        )}>
+                          {item.selected && <Check className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-zinc-800 truncate">{item.template.title}</p>
+                          <p className="text-xs text-zinc-400">
+                            {formatDateShort(item.date)} · {formatTime(item.template.start_time)} – {formatTime(item.template.end_time)}
+                          </p>
+                        </div>
+                        <span className={cn(
+                          "text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0",
+                          item.template.category === "Restricted" ? "bg-violet-50 text-violet-700" :
+                          item.template.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
+                          "bg-blue-50 text-blue-700"
+                        )}>
+                          {item.template.category}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="px-5 py-3.5 border-t border-zinc-100 flex items-center justify-between gap-3">
+                    <button onClick={() => setShowTemplates(false)} className="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleGenerateFromTemplates}
+                      disabled={generatingFromTemplates || templateItems.filter(i => i.selected).length === 0}
+                      className="flex items-center gap-2 bg-violet-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-60"
+                    >
+                      {generatingFromTemplates ? (
+                        <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Generating…</>
+                      ) : (
+                        <><Repeat2 className="w-3.5 h-3.5" />Generate {templateItems.filter(i => i.selected).length} Activities</>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -618,7 +836,12 @@ export default function WeeklyReviewPage() {
 
               {/* Summary + submit */}
               <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-                <h3 className="text-sm font-semibold text-zinc-900 mb-3">Week summary</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-zinc-900">Week summary</h3>
+                  <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full border border-violet-100">
+                    Counts toward your MSP
+                  </span>
+                </div>
                 <div className="grid grid-cols-4 gap-3 mb-4">
                   {[
                     { label: "Total", value: totalHours, color: "text-zinc-900" },

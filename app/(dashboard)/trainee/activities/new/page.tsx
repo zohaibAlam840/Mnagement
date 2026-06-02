@@ -3,12 +3,14 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2, AlertCircle } from "lucide-react"
+import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2, AlertCircle, Users, Eye } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
 const CATEGORIES = ["Restricted", "Unrestricted", "Supervision"] as const
 type Category = typeof CATEGORIES[number]
+type SessionType = "individual" | "group"
+type ObservationType = "direct" | "remote" | "indirect"
 
 const SUBCATEGORIES: Record<Category, string[]> = {
   Restricted: [
@@ -31,8 +33,6 @@ const SUBCATEGORIES: Record<Category, string[]> = {
   Supervision: [
     "Individual Supervision",
     "Group Supervision",
-    "Observation — Direct",
-    "Observation — Remote",
     "Case Review",
     "Other Supervision",
   ],
@@ -57,9 +57,18 @@ export default function NewActivityPage() {
   const [category, setCategory] = useState<Category>("Restricted")
   const [subcategory, setSubcategory] = useState(SUBCATEGORIES["Restricted"][0])
   const [client, setClient] = useState("")
+
+  // Supervision type — required when category = Supervision
+  const [sessionType, setSessionType] = useState<SessionType>("individual")
+
+  // Supervision-related flag — for non-Supervision activities done under a supervisor
   const [supervisionRelated, setSupervisionRelated] = useState(false)
-  const [directObservation, setDirectObservation] = useState(false)
+
+  // Observation
+  const [hasObservation, setHasObservation] = useState(false)
+  const [observationType, setObservationType] = useState<ObservationType>("direct")
   const [observationMinutes, setObservationMinutes] = useState(0)
+
   const [notes, setNotes] = useState("")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -73,10 +82,17 @@ export default function NewActivityPage() {
   const handleCategoryChange = (c: Category) => {
     setCategory(c)
     setSubcategory(SUBCATEGORIES[c][0])
+    if (c === "Supervision") {
+      setSupervisionRelated(false)
+    }
   }
 
   const handleSave = async () => {
     setError("")
+    if (category === "Supervision" && !sessionType) {
+      setError("Please select Individual or Group for this supervision activity.")
+      return
+    }
     setSaving(true)
     const supabase = createClient()
 
@@ -93,9 +109,11 @@ export default function NewActivityPage() {
       category,
       subcategory,
       client_name: client || null,
-      observation_with_client: directObservation,
-      observation_duration_minutes: directObservation ? observationMinutes : 0,
-      supervision_present: supervisionRelated,
+      session_type: category === "Supervision" ? sessionType : null,
+      observation_with_client: hasObservation,
+      observation_type: hasObservation ? observationType : null,
+      observation_duration_minutes: hasObservation ? observationMinutes : 0,
+      supervision_present: category === "Supervision" ? true : supervisionRelated,
       notes: notes || null,
       status: "draft",
       week_start_date: getWeekStart(date),
@@ -118,7 +136,7 @@ export default function NewActivityPage() {
         </p>
         <div className="flex gap-3">
           <button
-            onClick={() => { setSaved(false); setTitle(""); setNotes(""); setClient("") }}
+            onClick={() => { setSaved(false); setTitle(""); setNotes(""); setClient(""); setHasObservation(false) }}
             className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 transition-colors"
           >
             Log another
@@ -237,6 +255,38 @@ export default function NewActivityPage() {
           </div>
         </div>
 
+        {/* Supervision Type — only shown when category = Supervision */}
+        {category === "Supervision" && (
+          <div className="bg-white rounded-xl border border-emerald-100 p-5">
+            <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
+              <Users className="w-3.5 h-3.5" /> Supervision Type
+            </label>
+            <p className="text-xs text-zinc-400 mb-3">
+              Group supervision must not exceed 50% of total supervision time (BACB requirement).
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {(["individual", "group"] as SessionType[]).map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setSessionType(type)}
+                  className={cn(
+                    "flex flex-col items-center gap-1.5 py-3 px-4 rounded-xl border-2 transition-all text-sm font-semibold capitalize",
+                    sessionType === type
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                      : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
+                  )}
+                >
+                  <Users className={cn("w-4 h-4", sessionType === type ? "text-emerald-600" : "text-zinc-400")} />
+                  {type === "individual" ? "Individual" : "Group"}
+                  <span className="text-[10px] font-normal text-zinc-400">
+                    {type === "individual" ? "1-on-1 supervision" : "≤50% of total supervision"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Client */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
           <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
@@ -250,50 +300,97 @@ export default function NewActivityPage() {
           />
         </div>
 
-        {/* Flags */}
+        {/* Observation */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-          <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Flags</p>
-          <div className="space-y-3">
-            {[
-              { label: "Supervision-related", desc: "This activity was conducted under active supervision", value: supervisionRelated, onChange: setSupervisionRelated },
-              { label: "Direct observation", desc: "Supervisor was physically or remotely present", value: directObservation, onChange: setDirectObservation },
-            ].map((flag) => (
-              <button
-                key={flag.label}
-                onClick={() => flag.onChange(!flag.value)}
-                className={cn(
-                  "w-full flex items-start gap-3 text-left px-4 py-3 rounded-xl border transition-all",
-                  flag.value ? "border-violet-200 bg-violet-50" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
-                )}
-              >
-                <div className={cn(
-                  "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
-                  flag.value ? "bg-violet-600 border-violet-600" : "border-zinc-300"
-                )}>
-                  {flag.value && <div className="w-2 h-2 rounded-full bg-white" />}
+          <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
+            <Eye className="w-3.5 h-3.5" /> Observation
+          </label>
+          <button
+            onClick={() => setHasObservation(!hasObservation)}
+            className={cn(
+              "w-full flex items-start gap-3 text-left px-4 py-3 rounded-xl border transition-all mb-3",
+              hasObservation ? "border-violet-200 bg-violet-50" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
+            )}
+          >
+            <div className={cn(
+              "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
+              hasObservation ? "bg-violet-600 border-violet-600" : "border-zinc-300"
+            )}>
+              {hasObservation && <div className="w-2 h-2 rounded-full bg-white" />}
+            </div>
+            <div>
+              <p className={cn("text-sm font-semibold", hasObservation ? "text-violet-800" : "text-zinc-700")}>
+                Observation occurred during this activity
+              </p>
+              <p className="text-xs text-zinc-400 mt-0.5">Required at least once per supervisory period</p>
+            </div>
+          </button>
+
+          {hasObservation && (
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs text-zinc-500 mb-1.5">Observation Type</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["direct", "remote", "indirect"] as ObservationType[]).map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setObservationType(type)}
+                      className={cn(
+                        "py-2 px-3 rounded-lg border text-xs font-semibold capitalize transition-all",
+                        observationType === type
+                          ? "border-violet-500 bg-violet-50 text-violet-800"
+                          : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
+                      )}
+                    >
+                      {type}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <p className={cn("text-sm font-semibold", flag.value ? "text-violet-800" : "text-zinc-700")}>{flag.label}</p>
-                  <p className="text-xs text-zinc-400 mt-0.5">{flag.desc}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-          {directObservation && (
-            <div className="mt-3">
-              <p className="text-xs text-zinc-500 mb-1.5">Observation duration (minutes)</p>
-              <input
-                type="number"
-                min="0"
-                value={observationMinutes}
-                onChange={(e) => setObservationMinutes(parseInt(e.target.value) || 0)}
-                placeholder="e.g. 60"
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
-              />
-              <p className="text-[11px] text-zinc-400 mt-1">2027 BACB requirement: concentrated = 90 min/month · supervised = 60 min/month</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500 mb-1.5">Observation duration (minutes)</p>
+                <input
+                  type="number"
+                  min="0"
+                  value={observationMinutes}
+                  onChange={(e) => setObservationMinutes(parseInt(e.target.value) || 0)}
+                  placeholder="e.g. 60"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
+                />
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  2027 BACB minimum: Concentrated = 90 min/month · Supervised = 60 min/month
+                </p>
+              </div>
             </div>
           )}
         </div>
+
+        {/* Supervision-related flag — only for non-Supervision categories */}
+        {category !== "Supervision" && (
+          <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
+            <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Additional Flags</p>
+            <button
+              onClick={() => setSupervisionRelated(!supervisionRelated)}
+              className={cn(
+                "w-full flex items-start gap-3 text-left px-4 py-3 rounded-xl border transition-all",
+                supervisionRelated ? "border-violet-200 bg-violet-50" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
+              )}
+            >
+              <div className={cn(
+                "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
+                supervisionRelated ? "bg-violet-600 border-violet-600" : "border-zinc-300"
+              )}>
+                {supervisionRelated && <div className="w-2 h-2 rounded-full bg-white" />}
+              </div>
+              <div>
+                <p className={cn("text-sm font-semibold", supervisionRelated ? "text-violet-800" : "text-zinc-700")}>
+                  Supervision-related
+                </p>
+                <p className="text-xs text-zinc-400 mt-0.5">This activity was conducted under active supervision</p>
+              </div>
+            </button>
+          </div>
+        )}
 
         {/* Notes */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">

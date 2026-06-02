@@ -37,6 +37,9 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
   const [title, setTitle] = useState("")
   const [notes, setNotes] = useState("")
   const [category, setCategory] = useState<ActivityRow["category"]>("Restricted")
+  const [sessionType, setSessionType] = useState<"individual" | "group" | null>(null)
+  const [observationType, setObservationType] = useState<"direct" | "remote" | "indirect" | null>(null)
+  const [observationMinutes, setObservationMinutes] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -56,6 +59,9 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       setTitle(data.title)
       setNotes(data.notes ?? "")
       setCategory(data.category)
+      setSessionType(data.session_type ?? null)
+      setObservationType(data.observation_type ?? null)
+      setObservationMinutes(data.observation_duration_minutes ?? 0)
       setLoading(false)
     }
     load()
@@ -67,7 +73,14 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
     const supabase = createClient()
     const { data } = await supabase
       .from("activities")
-      .update({ title, notes: notes || null, category })
+      .update({
+        title,
+        notes: notes || null,
+        category,
+        session_type: category === "Supervision" ? sessionType : null,
+        observation_type: observationType,
+        observation_duration_minutes: observationMinutes,
+      })
       .eq("id", activity.id)
       .select()
       .single()
@@ -225,26 +238,83 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
 
       {/* Flags */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-4 mb-4">
-        <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Flags</p>
+        <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Supervision & Observation</p>
         <div className="flex flex-wrap gap-2">
-          {[
-            { label: "Supervision-related", active: activity.supervision_present },
-            { label: "Direct observation", active: activity.observation_with_client },
-          ].map((flag) => (
-            <span
-              key={flag.label}
-              className={cn(
-                "text-xs font-semibold px-3 py-1.5 rounded-full border",
-                flag.active ? "bg-violet-50 text-violet-700 border-violet-100" : "bg-zinc-50 text-zinc-400 border-zinc-100"
-              )}
-            >
-              {flag.active ? "✓" : "–"} {flag.label}
+          {activity.supervision_present && (
+            <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100">
+              ✓ Supervision-related
             </span>
-          ))}
-          {activity.observation_with_client && activity.observation_duration_minutes > 0 && (
-            <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
-              {activity.observation_duration_minutes} min observation
-            </span>
+          )}
+          {activity.category === "Supervision" && (
+            editing ? (
+              <div className="w-full flex gap-2 mt-1">
+                {(["individual", "group"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setSessionType(t)}
+                    className={cn(
+                      "flex-1 py-2 text-xs font-semibold rounded-lg border capitalize transition-all",
+                      sessionType === t ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-zinc-200 text-zinc-500"
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : activity.session_type ? (
+              <span className={cn(
+                "text-xs font-semibold px-3 py-1.5 rounded-full border capitalize",
+                activity.session_type === "individual"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                  : "bg-blue-50 text-blue-700 border-blue-100"
+              )}>
+                {activity.session_type} supervision
+              </span>
+            ) : null
+          )}
+          {activity.observation_with_client && (
+            editing ? (
+              <div className="w-full space-y-2 mt-1">
+                <div className="flex gap-2">
+                  {(["direct", "remote", "indirect"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setObservationType(t)}
+                      className={cn(
+                        "flex-1 py-2 text-xs font-semibold rounded-lg border capitalize transition-all",
+                        observationType === t ? "border-violet-500 bg-violet-50 text-violet-800" : "border-zinc-200 text-zinc-500"
+                      )}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  value={observationMinutes}
+                  onChange={(e) => setObservationMinutes(parseInt(e.target.value) || 0)}
+                  placeholder="Observation minutes"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+              </div>
+            ) : (
+              <>
+                {activity.observation_type && (
+                  <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100 capitalize">
+                    {activity.observation_type} observation
+                  </span>
+                )}
+                {activity.observation_duration_minutes > 0 && (
+                  <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
+                    {activity.observation_duration_minutes} min
+                  </span>
+                )}
+              </>
+            )
+          )}
+          {!activity.supervision_present && !activity.observation_with_client && activity.category !== "Supervision" && (
+            <span className="text-xs text-zinc-400 italic">No supervision flags</span>
           )}
         </div>
       </div>

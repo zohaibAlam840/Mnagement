@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react"
 import Link from "next/link"
-import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature } from "lucide-react"
+import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature, Lock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
@@ -121,15 +121,20 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         }
       ` }} />
       <Link href="/trainee/reports" className="print-hide flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
-        <ChevronLeft className="w-4 h-4" /> Reports
+        <ChevronLeft className="w-4 h-4" /> MSP Reports
       </Link>
 
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-zinc-900">{formatMonth(month)}</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Monthly BACB Fieldwork Verification</p>
+          <p className="text-sm text-zinc-500 mt-0.5">Monthly Supervisory Period (MSP) · BACB Fieldwork Verification</p>
         </div>
         <div className="flex items-center gap-2">
+          {summary.supervisor_signed_at && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-zinc-600 bg-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-200">
+              <Lock className="w-3.5 h-3.5" /> MSP Locked
+            </span>
+          )}
           {isCompliant
             ? <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-100"><CheckCircle2 className="w-3.5 h-3.5" /> Compliant</span>
             : <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-100"><AlertTriangle className="w-3.5 h-3.5" /> Warning</span>

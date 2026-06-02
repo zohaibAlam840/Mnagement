@@ -32,7 +32,7 @@ const traineeNav: NavItem[] = [
   { label: "Templates", icon: Repeat2, href: "/trainee/templates" },
   { label: "Weekly Review", icon: CalendarCheck, href: "/trainee/weekly-review" },
   { label: "My Supervisor", icon: UserCheck, href: "/trainee/supervisor" },
-  { label: "Reports", icon: FileText, href: "/trainee/reports" },
+  { label: "MSP Reports", icon: FileText, href: "/trainee/reports" },
 ]
 
 const supervisorNavBase: NavItem[] = [
@@ -40,7 +40,7 @@ const supervisorNavBase: NavItem[] = [
   { label: "Supervisees", icon: Users, href: "/supervisor/supervisees" },
   { label: "Approvals", icon: CheckSquare, href: "/supervisor/approvals" },
   { label: "Sessions", icon: Video, href: "/supervisor/sessions" },
-  { label: "Sign-Off", icon: FileText, href: "/supervisor/sign-off" },
+  { label: "MSP Sign-Off", icon: FileText, href: "/supervisor/sign-off" },
 ]
 
 const bottomNavBase: NavItem[] = [

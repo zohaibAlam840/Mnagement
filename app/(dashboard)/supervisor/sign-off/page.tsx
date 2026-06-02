@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { CheckCircle2, AlertTriangle, FileSignature, Clock, BarChart3, Download, Loader2 } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { CheckCircle2, AlertTriangle, FileSignature, Clock, BarChart3, Download, Loader2, Lock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
@@ -61,6 +61,14 @@ export default function SignOffPage() {
   const [genSuccess, setGenSuccess] = useState<string>("")
 
   const monthOptions = getLast12Months()
+
+  // Check if the currently selected trainee+month combination is already signed (locked)
+  const lockedRecord = useMemo(() => {
+    if (!genTraineeId || !genMonth) return null
+    return summaries.find(
+      s => s.trainee_id === genTraineeId && s.month === genMonth && !!s.supervisor_signed_at
+    ) ?? null
+  }, [summaries, genTraineeId, genMonth])
 
   const loadSummaries = useCallback(async (uid: string, profileMap?: Record<string, Profile>) => {
     const supabase = createClient()
@@ -143,6 +151,10 @@ export default function SignOffPage() {
       setGenError("Please select a trainee and month.")
       return
     }
+    if (lockedRecord) {
+      setGenError("This Monthly Supervisory Period is locked — it has already been signed. Undo the signature first to regenerate.")
+      return
+    }
     setGenerating(true)
     try {
       const supabase = createClient()
@@ -158,7 +170,7 @@ export default function SignOffPage() {
       // Fetch activities
       const { data: actsRaw, error: actsErr } = await (supabase as any)
         .from("activities")
-        .select("*")
+        .select("duration_minutes, category, observation_with_client, observation_duration_minutes, session_type")
         .eq("trainee_id", genTraineeId)
         .gte("date", monthStart)
         .lt("date", nextMonthStr)
@@ -170,18 +182,30 @@ export default function SignOffPage() {
         category: string
         observation_with_client: boolean
         observation_duration_minutes: number
+        session_type: "individual" | "group" | null
       }[]
 
       // Aggregate
       const totalMins = acts.reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
       const restrictedMins = acts.filter((a) => a.category === "Restricted").reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
       const unrestrictedMins = acts.filter((a) => a.category === "Unrestricted").reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
-      const supervisionMins = acts.filter((a) => a.category === "Supervision").reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
+      const supervisionActs = acts.filter((a) => a.category === "Supervision")
+      const supervisionMins = supervisionActs.reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
+
+      // Split supervision by session_type
+      const individualSupMins = supervisionActs
+        .filter((a) => a.session_type === "individual" || a.session_type === null)
+        .reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
+      const groupSupMins = supervisionActs
+        .filter((a) => a.session_type === "group")
+        .reduce((a, c) => a + (c.duration_minutes ?? 0), 0)
 
       const totalH = totalMins / 60
       const restrictedH = restrictedMins / 60
       const unrestrictedH = unrestrictedMins / 60
       const supervisionH = supervisionMins / 60
+      const individualSupH = individualSupMins / 60
+      const groupSupH = groupSupMins / 60
 
       const obsActs = acts.filter((a) => a.observation_with_client === true)
       const obsCount = obsActs.length
@@ -199,10 +223,12 @@ export default function SignOffPage() {
       const reqYear = tp?.requirements_year ?? "2022"
 
       const supPct = totalH > 0 ? (supervisionH / totalH) * 100 : 0
+      const groupSupPct = supervisionH > 0 ? (groupSupH / supervisionH) * 100 : 0
       const minSupPct = fieldworkType === "concentrated" ? 7.5 : 5
       const monthlyCapHours = reqYear === "2027" ? 160 : 130
       const within_monthly_cap = totalH <= monthlyCapHours
-      const supervision_pct_met = supPct >= minSupPct
+      // Supervision met = minimum % AND group not exceeding 50% of supervision
+      const supervision_pct_met = supPct >= minSupPct && groupSupPct <= 50
       const minObsDuration = fieldworkType === "concentrated" ? 90 : 60
       const observation_requirement_met = reqYear === "2022" ? obsCount >= 1 : obsMins >= minObsDuration
 
@@ -216,8 +242,8 @@ export default function SignOffPage() {
         total_hours: totalH,
         restricted_hours: restrictedH,
         unrestricted_hours: unrestrictedH,
-        supervision_hours_individual: supervisionH,
-        supervision_hours_group: 0,
+        supervision_hours_individual: individualSupH,
+        supervision_hours_group: groupSupH,
         observations_count: obsCount,
         observations_duration_minutes: obsMins,
         within_monthly_cap,
@@ -226,14 +252,18 @@ export default function SignOffPage() {
         status: "pending",
       }
 
-      // Check if already exists
+      // Check if already exists — and block if signed (locked)
       const { data: existing } = await (supabase as any)
         .from("monthly_summaries")
-        .select("id")
+        .select("id, supervisor_signed_at")
         .eq("trainee_id", genTraineeId)
         .eq("supervisor_id", supervisorId)
         .eq("month", genMonth)
         .maybeSingle()
+
+      if (existing?.supervisor_signed_at) {
+        throw new Error("This Monthly Supervisory Period is locked (already signed). Undo the signature before regenerating.")
+      }
 
       if (existing?.id) {
         const { error: upErr } = await (supabase as any)
@@ -289,8 +319,8 @@ export default function SignOffPage() {
   return (
     <div className="p-4 md:p-7 max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Monthly Sign-Off</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">Review and electronically sign monthly verification forms</p>
+        <h1 className="text-xl md:text-2xl font-bold text-zinc-900">Monthly Supervisory Period Sign-Off</h1>
+        <p className="text-sm text-zinc-500 mt-0.5">Review and sign each trainee&apos;s Monthly Supervisory Period (MSP) to confirm BACB compliance</p>
       </div>
 
       {/* Generate Monthly Report card */}
@@ -336,21 +366,37 @@ export default function SignOffPage() {
               </select>
             </div>
 
-            {/* Generate button */}
-            <button
-              onClick={handleGenerate}
-              disabled={generating || !genTraineeId || !genMonth}
-              className="flex items-center gap-2 bg-violet-600 text-white font-semibold px-5 py-2 rounded-xl text-sm hover:bg-violet-700 transition-colors disabled:opacity-60 whitespace-nowrap flex-shrink-0"
-            >
-              {generating ? (
-                <><Loader2 className="w-4 h-4 animate-spin" />Generating…</>
-              ) : (
-                <><BarChart3 className="w-4 h-4" />Generate</>
-              )}
-            </button>
+            {/* Generate button — locked if already signed */}
+            {lockedRecord ? (
+              <div className="flex items-center gap-2 bg-zinc-100 text-zinc-500 font-semibold px-5 py-2 rounded-xl text-sm whitespace-nowrap flex-shrink-0 cursor-not-allowed">
+                <Lock className="w-4 h-4" />
+                MSP Locked
+              </div>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={generating || !genTraineeId || !genMonth}
+                className="flex items-center gap-2 bg-violet-600 text-white font-semibold px-5 py-2 rounded-xl text-sm hover:bg-violet-700 transition-colors disabled:opacity-60 whitespace-nowrap flex-shrink-0"
+              >
+                {generating ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" />Generating…</>
+                ) : (
+                  <><BarChart3 className="w-4 h-4" />Generate</>
+                )}
+              </button>
+            )}
           </div>
         )}
 
+        {lockedRecord && (
+          <div className="mt-3 flex items-center gap-2 text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm">
+            <Lock className="w-4 h-4 flex-shrink-0 text-zinc-500" />
+            <span>
+              This MSP was signed on {new Date(lockedRecord.supervisor_signed_at!).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} and is locked.
+              Use <strong>Undo</strong> on the report to unsign before regenerating.
+            </span>
+          </div>
+        )}
         {genError && (
           <div className="mt-3 flex items-center gap-2 text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-sm">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -426,7 +472,7 @@ export default function SignOffPage() {
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <h2 className="font-bold text-zinc-900">{traineeName}</h2>
-                      <p className="text-sm text-zinc-500">{formatMonth(selected.month)} · Fieldwork Verification</p>
+                      <p className="text-sm text-zinc-500">{formatMonth(selected.month)} · Monthly Supervisory Period (MSP)</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -462,12 +508,31 @@ export default function SignOffPage() {
                     ))}
                   </div>
 
+                  {/* Supervision breakdown */}
+                  {supervisionH > 0 && (
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      {[
+                        { label: "Individual Supervision", value: `${selected.supervision_hours_individual.toFixed(1)}h` },
+                        { label: "Group Supervision", value: `${selected.supervision_hours_group.toFixed(1)}h` },
+                      ].map((item) => (
+                        <div key={item.label} className="text-center bg-emerald-50 rounded-lg py-2">
+                          <p className="text-sm font-bold text-emerald-900">{item.value}</p>
+                          <p className="text-[10px] text-emerald-600">{item.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="space-y-2 mb-4">
-                    {[
-                      { label: `Restricted ≤ 50% (${restrictedPct.toFixed(1)}%)`, pass: restrictedPct <= 50 },
-                      { label: `Supervision ≥ ${minSup}% (${supervisionPct.toFixed(1)}%)`, pass: supervisionPct >= minSup },
-                      { label: "Monthly minimum met", pass: selected.within_monthly_cap !== false },
-                    ].map((c) => (
+                    {(() => {
+                      const groupSupPct = supervisionH > 0 ? (selected.supervision_hours_group / supervisionH) * 100 : 0
+                      return [
+                        { label: `Restricted ≤ 50% (${restrictedPct.toFixed(1)}%)`, pass: restrictedPct <= 50 },
+                        { label: `Supervision ≥ ${minSup}% (${supervisionPct.toFixed(1)}%)`, pass: supervisionPct >= minSup },
+                        { label: `Group supervision ≤ 50% of supervision (${groupSupPct.toFixed(1)}%)`, pass: groupSupPct <= 50 },
+                        { label: "Monthly minimum met", pass: selected.within_monthly_cap !== false },
+                      ]
+                    })().map((c) => (
                       <div key={c.label} className={cn(
                         "flex items-center gap-2.5 p-2.5 rounded-lg text-sm",
                         c.pass ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"
@@ -489,7 +554,7 @@ export default function SignOffPage() {
                     <div>
                       <p className="text-sm font-semibold text-zinc-900">Supervisor Verification</p>
                       <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
-                        By signing, I confirm that I have reviewed this trainee&apos;s fieldwork hours for {formatMonth(selected.month)}, that all entries are accurate, and that this trainee met BACB supervision requirements.
+                        By signing, I confirm that I have reviewed this trainee&apos;s Monthly Supervisory Period (MSP) for {formatMonth(selected.month)}, that all entries are accurate, and that BACB supervision requirements were met. This record will be locked after signing.
                       </p>
                     </div>
                   </div>
