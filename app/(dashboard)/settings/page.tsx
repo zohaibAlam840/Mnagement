@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { User, Bell, Shield, ChevronRight, Calendar, CheckCircle2, AlertCircle } from "lucide-react"
+import { User, Bell, Shield, ChevronRight, Calendar, CheckCircle2, AlertCircle, Users, UserCheck } from "lucide-react"
 import { SignOutButton } from "@/components/auth/SignOutButton"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -182,6 +182,11 @@ export default function SettingsPage() {
       {/* Settings list */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] overflow-hidden mb-5">
         {[
+          ...(profile?.role === "trainee"
+            ? [{ icon: UserCheck, label: "My Supervisors", desc: "Add or switch supervisors, set primary", href: "/trainee/supervisor" }]
+            : profile?.role === "supervisor"
+            ? [{ icon: Users, label: "Supervisees", desc: "Invite and manage your trainees", href: "/supervisor/supervisees" }]
+            : []),
           { icon: Bell, label: "Notifications", desc: "Weekly reminders, approval alerts", href: "/settings/notifications" },
           { icon: Calendar, label: "Calendar Sync", desc: "Google Calendar connection", href: "/settings/calendar" },
           { icon: User, label: "Account & Security", desc: "Password, two-factor authentication", href: "/settings/security" },

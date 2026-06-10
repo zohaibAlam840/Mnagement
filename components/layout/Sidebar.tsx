@@ -31,7 +31,7 @@ const traineeNav: NavItem[] = [
   { label: "Activities", icon: Activity, href: "/trainee/activities" },
   { label: "Templates", icon: Repeat2, href: "/trainee/templates" },
   { label: "Weekly Review", icon: CalendarCheck, href: "/trainee/weekly-review" },
-  { label: "My Supervisor", icon: UserCheck, href: "/trainee/supervisor" },
+  { label: "My Supervisors", icon: UserCheck, href: "/trainee/supervisor" },
   { label: "MSP Reports", icon: FileText, href: "/trainee/reports" },
 ]
 
