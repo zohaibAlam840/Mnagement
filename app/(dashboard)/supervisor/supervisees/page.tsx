@@ -138,15 +138,14 @@ export default function SuperviseesPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    // Look up trainee by email
-    const { data: traineeProfile } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("email", inviteEmail.trim().toLowerCase())
-      .single()
+    // Look up trainee by email via SECURITY DEFINER RPC (bypasses RLS so we can
+    // find accounts we aren't yet linked to)
+    const { data: lookupRows } = await (supabase as any)
+      .rpc("lookup_profile_by_email", { p_email: inviteEmail.trim() })
+    const traineeProfile = (lookupRows && lookupRows[0]) as { id: string; role: string } | undefined
 
     if (!traineeProfile) {
-      setInviteMsg({ type: "error", text: "No account found with that email address." })
+      setInviteMsg({ type: "error", text: "No account found with that email address. The trainee must sign up first." })
       setInviting(false)
       return
     }

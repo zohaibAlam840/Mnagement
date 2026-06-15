@@ -118,15 +118,14 @@ export default function MysupervisorPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setInviting(false); return }
 
-    // Look up supervisor by email
-    const { data: supProfile } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("email", email)
-      .maybeSingle()
+    // Look up supervisor by email via SECURITY DEFINER RPC (bypasses RLS so we can
+    // find accounts we aren't yet linked to)
+    const { data: lookupRows } = await (supabase as any)
+      .rpc("lookup_profile_by_email", { p_email: email })
+    const supProfile = (lookupRows && lookupRows[0]) as { id: string; role: string } | undefined
 
     if (!supProfile) {
-      setInviteMsg({ type: "error", text: "No account found with that email address." })
+      setInviteMsg({ type: "error", text: "No account found with that email address. The supervisor must sign up first." })
       setInviting(false)
       return
     }

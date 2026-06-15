@@ -29,10 +29,33 @@ type GCalEvent = {
   status?: string
 }
 
+type ImportKind =
+  | "Restricted"
+  | "Unrestricted"
+  | "Group Supervision"
+  | "Individual Supervision"
+  | "Observation"
+
 type ImportItem = {
   event: GCalEvent
-  category: "Restricted" | "Unrestricted" | "Supervision"
+  kind: ImportKind
   selected: boolean
+}
+
+// Map a calendar-import choice to the structured activity fields the DB stores.
+function kindToFields(kind: ImportKind, durationMins: number) {
+  switch (kind) {
+    case "Restricted":
+      return { category: "Restricted" as const, session_type: null, supervision_present: false, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
+    case "Unrestricted":
+      return { category: "Unrestricted" as const, session_type: null, supervision_present: false, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
+    case "Group Supervision":
+      return { category: "Supervision" as const, session_type: "group" as const, supervision_present: true, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
+    case "Individual Supervision":
+      return { category: "Supervision" as const, session_type: "individual" as const, supervision_present: true, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
+    case "Observation":
+      return { category: "Supervision" as const, session_type: null, supervision_present: true, observation_with_client: true, observation_type: "direct" as const, observation_duration_minutes: durationMins }
+  }
 }
 
 function toLocalDateStr(d: Date): string {
@@ -198,7 +221,7 @@ export default function WeeklyReviewPage() {
 
       setImportItems(data.map((e: GCalEvent) => ({
         event: e,
-        category: "Restricted" as const,
+        kind: "Restricted" as const,
         selected: true,
       })))
     } catch {
@@ -218,6 +241,7 @@ export default function WeeklyReviewPage() {
 
     const activitiesToInsert = selected.map(item => {
       const { date, startTime, endTime, durationMins } = parseGCalTime(item.event)
+      const fields = kindToFields(item.kind, durationMins)
       return {
         trainee_id: user.id,
         title: item.event.summary || "Imported from Google Calendar",
@@ -225,7 +249,7 @@ export default function WeeklyReviewPage() {
         start_time: startTime,
         end_time: endTime,
         duration_minutes: durationMins,
-        category: item.category,
+        ...fields,
         status: "draft" as const,
         notes: null,
         week_start_date: weekStart,
@@ -707,14 +731,16 @@ export default function WeeklyReviewPage() {
                           </div>
 
                           <select
-                            value={item.category}
-                            onChange={e => setImportItems(items => items.map((it, i) => i === idx ? { ...it, category: e.target.value as any } : it))}
+                            value={item.kind}
+                            onChange={e => setImportItems(items => items.map((it, i) => i === idx ? { ...it, kind: e.target.value as ImportKind } : it))}
                             disabled={!item.selected}
                             className="text-xs font-semibold border border-zinc-200 rounded-lg px-2 py-1.5 focus:outline-none bg-white disabled:opacity-40 text-zinc-700"
                           >
                             <option value="Restricted">Restricted</option>
                             <option value="Unrestricted">Unrestricted</option>
-                            <option value="Supervision">Supervision</option>
+                            <option value="Individual Supervision">Individual Supervision</option>
+                            <option value="Group Supervision">Group Supervision</option>
+                            <option value="Observation">Observation</option>
                           </select>
                         </div>
                       )
