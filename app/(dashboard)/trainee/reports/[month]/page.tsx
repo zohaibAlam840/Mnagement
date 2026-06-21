@@ -2,13 +2,19 @@
 
 import { useState, useEffect, use } from "react"
 import Link from "next/link"
-import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature, Lock } from "lucide-react"
+import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature, Lock, Users, Eye } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import {
+  computeMetrics, minSupervisionPct, monthlyCapHours, MIN_MONTHLY_HOURS,
+  requiredContacts, requiredObservation, supervisionColor, RATIO_COLOR_CLASS,
+  GROUP_SUPERVISION_MAX_PCT, type FieldworkType, type RequirementsYear,
+} from "@/lib/bacb"
 
 type MonthlySummary = Database["public"]["Tables"]["monthly_summaries"]["Row"]
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
+type ContactBreakdown = { individualMeetings: number; groupMeetings: number; obsCount: number; contacts: number }
 
 function formatMonth(m: string) {
   const [year, month] = m.split("-")
@@ -20,6 +26,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
 
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
   const [supervisor, setSupervisor] = useState<Profile | null>(null)
+  const [contacts, setContacts] = useState<ContactBreakdown | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [traineeSigningInProgress, setTraineeSigningInProgress] = useState(false)
@@ -45,6 +52,27 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         const { data: supRaw } = await supabase.from("profiles").select("*").eq("id", s.supervisor_id).single()
         if (supRaw) setSupervisor(supRaw as Profile)
       }
+
+      // Contacts/meeting counts aren't stored on the summary, so compute them
+      // live from the month's non-draft activities.
+      const monthStart = `${month}-01`
+      const [y, mo] = month.split("-").map(Number)
+      const nextMonth = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, "0")}-01`
+      const { data: actsRaw } = await (supabase as any)
+        .from("activities")
+        .select("duration_minutes, category, session_type, observation_with_client, observation_duration_minutes")
+        .eq("trainee_id", user.id)
+        .gte("date", monthStart)
+        .lt("date", nextMonth)
+        .neq("status", "draft")
+      const metrics = computeMetrics(actsRaw ?? [])
+      setContacts({
+        individualMeetings: metrics.individualMeetings,
+        groupMeetings: metrics.groupMeetings,
+        obsCount: metrics.obsCount,
+        contacts: metrics.contacts,
+      })
+
       setLoading(false)
     }
     load()
@@ -90,20 +118,29 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
     setTraineeSigningInProgress(false)
   }
 
+  const ft = summary.fieldwork_type as FieldworkType
+  const ry = summary.requirements_year as RequirementsYear
   const supervisionH = summary.supervision_hours_individual + summary.supervision_hours_group
   const restrictedPct = summary.total_hours > 0 ? (summary.restricted_hours / summary.total_hours) * 100 : 0
   const supervisionPct = summary.total_hours > 0 ? (supervisionH / summary.total_hours) * 100 : 0
-  const minSupervision = summary.fieldwork_type === "concentrated"
-    ? (summary.requirements_year === "2022" ? 10 : 7.5)
-    : 5
-  const monthlyCapHours = summary.requirements_year === "2027" ? 160 : 130
-  const minMonthlyHours = 20
+  const groupSupPct = supervisionH > 0 ? (summary.supervision_hours_group / supervisionH) * 100 : 0
+  const minSupervision = minSupervisionPct(ft, ry)
+  const cap = monthlyCapHours(ry)
+  const supColor = supervisionColor(supervisionPct)
+  const supCls = RATIO_COLOR_CLASS[supColor]
+  const reqObs = requiredObservation(ft, ry)
+  const reqContacts = requiredContacts(ft)
 
-  const restrictedOk = restrictedPct <= 50
+  // Supervision is evaluated MONTHLY; group must stay under 50%.
   const supervisionOk = supervisionPct >= minSupervision
-  const monthlyCapOk = summary.total_hours <= monthlyCapHours
-  const monthlyMinOk = summary.total_hours >= minMonthlyHours
-  const isCompliant = restrictedOk && supervisionOk && monthlyCapOk
+  const groupOk = groupSupPct <= GROUP_SUPERVISION_MAX_PCT
+  const monthlyCapOk = summary.total_hours <= cap
+  const monthlyMinOk = summary.total_hours >= MIN_MONTHLY_HOURS
+  const contactsOk = (contacts?.contacts ?? 0) >= reqContacts
+  const obsOk = summary.observation_requirement_met !== false
+  // Restricted 50% is NOT a monthly compliance failure — it applies over the
+  // entire experience, so it's shown for information only.
+  const isCompliant = supervisionOk && groupOk && monthlyCapOk
 
   const supervisorName = supervisor ? `${supervisor.first_name} ${supervisor.last_name}` : "Supervisor"
 
@@ -187,59 +224,67 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         </div>
       )}
 
-      {/* Compliance checks */}
+      {/* Compliance checks (monthly) */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
-        <h3 className="text-sm font-semibold text-zinc-900 mb-3">Compliance Checks</h3>
+        <h3 className="text-sm font-semibold text-zinc-900 mb-3">Monthly Compliance Checks</h3>
         <div className="space-y-3">
-          {[
+          {([
             {
-              label: "Restricted hours ≤ 50%",
-              value: `${restrictedPct.toFixed(1)}%`,
-              pass: restrictedOk,
-              detail: restrictedOk ? "Within limit" : "Exceeds 50% limit",
-            },
-            {
-              label: `Supervision ≥ ${minSupervision}% of total`,
+              label: `Supervision ≥ ${minSupervision}% of total (monthly)`,
               value: `${supervisionPct.toFixed(1)}%`,
-              pass: supervisionOk,
-              detail: supervisionOk ? "Above minimum" : `Below ${minSupervision}% minimum`,
+              tone: supervisionPct < 5 ? "fail" : (supervisionOk ? "pass" : "warn"),
+              detail: supervisionPct < 5 ? "Critical — below 5% this month" : supervisionOk ? supCls.label : `Below ${minSupervision}% target`,
             },
             {
-              label: `Monthly hours ≥ ${minMonthlyHours}h and ≤ ${monthlyCapHours}h`,
-              value: `${summary.total_hours.toFixed(1)}h`,
-              pass: monthlyMinOk && monthlyCapOk,
-              detail: !monthlyMinOk ? `Below ${minMonthlyHours}h minimum` : !monthlyCapOk ? `Exceeds ${monthlyCapHours}h cap` : "Within range",
+              label: `Group supervision ≤ ${GROUP_SUPERVISION_MAX_PCT}% of supervision`,
+              value: `${groupSupPct.toFixed(1)}%`,
+              tone: groupOk ? "pass" : "fail",
+              detail: groupOk ? "Within limit" : `Exceeds ${GROUP_SUPERVISION_MAX_PCT}% limit`,
             },
-            ...(summary.observations_count > 0 || summary.requirements_year !== "2022" ? [{
-              label: summary.requirements_year === "2022"
-                ? "Client observations (≥ 1/month)"
-                : `Client observation duration (≥ ${summary.fieldwork_type === "concentrated" ? 90 : 60} min/month)`,
-              value: summary.requirements_year === "2022"
-                ? `${summary.observations_count} contact(s)`
-                : `${summary.observations_duration_minutes} min`,
-              pass: summary.observation_requirement_met !== false,
-              detail: summary.observation_requirement_met !== false
-                ? (summary.requirements_year === "2022" ? `${summary.observations_count} contact(s)` : `${summary.observations_duration_minutes} min logged`)
-                : "Below requirement",
-            }] : []),
-          ].map((check) => (
-            <div key={check.label} className={cn(
-              "flex items-center justify-between p-3 rounded-lg",
-              check.pass ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100"
-            )}>
-              <div className="flex items-center gap-2.5">
-                {check.pass
-                  ? <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  : <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                }
-                <div>
-                  <p className={cn("text-sm font-medium", check.pass ? "text-emerald-800" : "text-red-800")}>{check.label}</p>
-                  <p className={cn("text-xs", check.pass ? "text-emerald-600" : "text-red-600")}>{check.detail}</p>
+            {
+              label: `Contacts ≥ ${reqContacts} this month`,
+              value: `${contacts?.contacts ?? 0}`,
+              tone: contactsOk ? "pass" : "warn",
+              detail: `${contacts?.individualMeetings ?? 0} individual + ${contacts?.groupMeetings ?? 0} group + ${contacts?.obsCount ?? 0} observation`,
+            },
+            {
+              label: reqObs.kind === "count" ? "Client observation (≥ 1/month)" : `Observation duration (≥ ${reqObs.value} min/month)`,
+              value: reqObs.kind === "count" ? `${summary.observations_count} contact(s)` : `${summary.observations_duration_minutes} min`,
+              tone: obsOk ? "pass" : "warn",
+              detail: obsOk ? "Requirement met" : "Below requirement",
+            },
+            {
+              label: `Monthly hours ≥ ${MIN_MONTHLY_HOURS}h and ≤ ${cap}h`,
+              value: `${summary.total_hours.toFixed(1)}h`,
+              tone: (monthlyMinOk && monthlyCapOk) ? "pass" : "warn",
+              detail: !monthlyMinOk ? `Below ${MIN_MONTHLY_HOURS}h minimum` : !monthlyCapOk ? `Exceeds ${cap}h cap` : "Within range",
+            },
+            {
+              label: "Restricted share (tracked over total experience)",
+              value: `${restrictedPct.toFixed(1)}%`,
+              tone: "info" as const,
+              detail: "Not capped monthly — evens out across your experience",
+            },
+          ] as { label: string; value: string; tone: "pass" | "fail" | "warn" | "info"; detail: string }[]).map((check) => {
+            const styles = {
+              pass: { box: "bg-emerald-50 border-emerald-100", title: "text-emerald-800", sub: "text-emerald-600", val: "text-emerald-700", icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" /> },
+              fail: { box: "bg-red-50 border-red-100", title: "text-red-800", sub: "text-red-600", val: "text-red-600", icon: <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" /> },
+              warn: { box: "bg-amber-50 border-amber-100", title: "text-amber-800", sub: "text-amber-600", val: "text-amber-700", icon: <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" /> },
+              info: { box: "bg-zinc-50 border-zinc-200", title: "text-zinc-700", sub: "text-zinc-500", val: "text-zinc-600", icon: <Clock className="w-4 h-4 text-zinc-400 flex-shrink-0" /> },
+            }[check.tone]
+            return (
+              <div key={check.label} className={cn("flex items-center justify-between p-3 rounded-lg border", styles.box)}>
+                <div className="flex items-center gap-2.5">
+                  {styles.icon}
+                  <div>
+                    <p className={cn("text-sm font-medium", styles.title)}>{check.label}</p>
+                    <p className={cn("text-xs", styles.sub)}>{check.detail}</p>
+                  </div>
                 </div>
+                <span className={cn("text-sm font-bold", styles.val)}>{check.value}</span>
               </div>
-              <span className={cn("text-sm font-bold", check.pass ? "text-emerald-700" : "text-red-600")}>{check.value}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

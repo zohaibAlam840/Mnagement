@@ -15,9 +15,12 @@ function formatMonth(m: string) {
 }
 
 function getComplianceStatus(s: MonthlySummary): "compliant" | "warning" | "critical" {
-  const restrictedPct = s.total_hours > 0 ? (s.restricted_hours / s.total_hours) * 100 : 0
-  if (restrictedPct > 50 || s.supervision_pct_met === false) return "critical"
-  if (restrictedPct > 46 || s.within_monthly_cap === false) return "warning"
+  // Supervision is evaluated MONTHLY: under 5% is critical. Restricted % is NOT
+  // a monthly failure — it's tracked over the entire experience.
+  const supervisionH = s.supervision_hours_individual + s.supervision_hours_group
+  const supervisionPct = s.total_hours > 0 ? (supervisionH / s.total_hours) * 100 : 0
+  if (s.total_hours > 0 && supervisionPct < 5) return "critical"
+  if (s.supervision_pct_met === false || s.within_monthly_cap === false || s.observation_requirement_met === false) return "warning"
   return "compliant"
 }
 
