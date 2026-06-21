@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, CheckCircle2, Users, Calendar, Clock, Video, MessageSquare, AlertCircle } from "lucide-react"
+import { ChevronLeft, CheckCircle2, Users, Calendar, Clock, Video, MessageSquare, AlertCircle, Repeat2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
@@ -12,6 +12,19 @@ type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type TraineeProfile = Database["public"]["Tables"]["trainee_profiles"]["Row"]
 type SessionType = "individual" | "group"
 type ObservationType = "direct" | "remote" | "indirect"
+
+const REPEAT_OPTIONS = [
+  { weeks: 1, label: "One-time" },
+  { weeks: 4, label: "Weekly ×4" },
+  { weeks: 8, label: "Weekly ×8" },
+  { weeks: 12, label: "Weekly ×12" },
+]
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
 
 export default function NewSessionPage() {
   const router = useRouter()
@@ -27,10 +40,12 @@ export default function NewSessionPage() {
   const [sessionType, setSessionType] = useState<SessionType>("individual")
   const [observationType, setObservationType] = useState<ObservationType>("direct")
   const [observationMinutes, setObservationMinutes] = useState(60)
+  const [repeatWeeks, setRepeatWeeks] = useState(1)
   const [notes, setNotes] = useState("")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [savedName, setSavedName] = useState("")
+  const [savedCount, setSavedCount] = useState(1)
   const [error, setError] = useState("")
 
   const startMins = parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1])
@@ -77,10 +92,11 @@ export default function NewSessionPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const { error: insertError } = await supabase.from("supervision_sessions").insert({
+    // Build one row per weekly occurrence (repeatWeeks === 1 → single session).
+    const rows = Array.from({ length: repeatWeeks }, (_, i) => ({
       supervisor_id: user.id,
       trainee_id: traineeId,
-      date,
+      date: addDays(date, i * 7),
       start_time: startTime + ":00",
       end_time: endTime + ":00",
       duration_minutes: durationMinutes,
@@ -89,13 +105,16 @@ export default function NewSessionPage() {
       observation_duration_minutes: observationMinutes,
       notes: notes || null,
       status: "pending",
-    })
+    }))
+
+    const { error: insertError } = await supabase.from("supervision_sessions").insert(rows)
 
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
 
     const sel = supervisees.find(s => s.id === traineeId)
     setSavedName(sel ? `${sel.first_name} ${sel.last_name}` : "Trainee")
+    setSavedCount(rows.length)
     setSaved(true)
   }
 
@@ -105,14 +124,18 @@ export default function NewSessionPage() {
         <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
           <CheckCircle2 className="w-8 h-8 text-emerald-600" />
         </div>
-        <h2 className="text-xl font-bold text-zinc-900 mb-1">Session logged!</h2>
+        <h2 className="text-xl font-bold text-zinc-900 mb-1">
+          {savedCount > 1 ? `${savedCount} sessions logged!` : "Session logged!"}
+        </h2>
         <p className="text-sm text-zinc-500 mb-1">
-          {sessionType} session with <span className="font-semibold text-zinc-700">{savedName}</span>
+          {sessionType} session{savedCount > 1 ? "s" : ""} with <span className="font-semibold text-zinc-700">{savedName}</span>
         </p>
-        <p className="text-xs text-zinc-400 mb-6">{duration.toFixed(1)}h · {observationType} observation · {date}</p>
+        <p className="text-xs text-zinc-400 mb-6">
+          {duration.toFixed(1)}h · {observationType} observation · {savedCount > 1 ? `${savedCount} weekly occurrences from ${date}` : date}
+        </p>
         <div className="flex gap-3">
           <button
-            onClick={() => { setSaved(false); setNotes(""); setDate(today) }}
+            onClick={() => { setSaved(false); setNotes(""); setDate(today); setRepeatWeeks(1) }}
             className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 transition-colors"
           >
             Log another
@@ -263,6 +286,29 @@ export default function NewSessionPage() {
           )}
         </div>
 
+        {/* Repeat — make sessions recurring like templates */}
+        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
+          <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
+            <Repeat2 className="w-3.5 h-3.5" /> Repeat
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+            {REPEAT_OPTIONS.map((opt) => (
+              <button key={opt.weeks} onClick={() => setRepeatWeeks(opt.weeks)}
+                className={cn(
+                  "py-2 text-xs font-semibold rounded-lg border transition-all",
+                  repeatWeeks === opt.weeks ? "bg-violet-600 text-white border-violet-600" : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
+                )}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {repeatWeeks > 1 && (
+            <p className="text-[11px] text-zinc-400 mt-2">
+              Creates {repeatWeeks} sessions, one each week starting {date}.
+            </p>
+          )}
+        </div>
+
         {/* Notes */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
           <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
@@ -295,7 +341,9 @@ export default function NewSessionPage() {
           )}
         >
           {saving ? "Saving…" : durationMinutes > 0 && traineeId
-            ? `Save ${duration.toFixed(1)}h ${sessionType} Session`
+            ? (repeatWeeks > 1
+                ? `Save ${repeatWeeks} weekly ${sessionType} sessions`
+                : `Save ${duration.toFixed(1)}h ${sessionType} Session`)
             : "Set a valid time range and supervisee to continue"
           }
         </button>
