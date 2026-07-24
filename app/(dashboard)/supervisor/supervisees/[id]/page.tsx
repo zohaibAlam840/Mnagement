@@ -6,6 +6,13 @@ import { ChevronLeft, CheckCircle2, AlertTriangle, Clock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import {
+  computeMetrics, inMonth, monthlyCapHours,
+  requiredContacts, requiredObservation, supervisionColor, RATIO_COLOR_CLASS,
+  type FieldworkType, type RequirementsYear,
+} from "@/lib/bacb"
+import MonthlyBreakdown from "@/components/dashboard/MonthlyBreakdown"
+import MonthSelect, { currentMonthValue, monthLabelFor } from "@/components/dashboard/MonthSelect"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type TraineeProfile = Database["public"]["Tables"]["trainee_profiles"]["Row"]
@@ -30,6 +37,7 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
   const [pendingReviews, setPendingReviews] = useState<WeeklyReview[]>([])
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthValue())
 
   useEffect(() => {
     async function load() {
@@ -112,6 +120,18 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
   const ini = `${profile.first_name[0]}${profile.last_name[0]}`.toUpperCase()
   const recentActivities = activities.slice(0, 6)
 
+  // --- Monthly (MSP) breakdown — same numbers as the trainee's own dashboard,
+  // for whichever month the supervisor picks in the dropdown ---
+  const fieldworkType = (traineeProfile?.fieldwork_type ?? "concentrated") as FieldworkType
+  const reqYear = (traineeProfile?.requirements_year ?? "both") as RequirementsYear
+  const monthLabel = monthLabelFor(selectedMonth)
+  const m = computeMetrics(inMonth(activities, selectedMonth))
+  const supCls = RATIO_COLOR_CLASS[supervisionColor(m.supervisionPct)]
+  const reqContacts = requiredContacts(fieldworkType)
+  const reqObs = requiredObservation(fieldworkType, reqYear)
+  const obsMet = reqObs.kind === "count" ? m.obsCount >= reqObs.value : m.obsMinutes >= reqObs.value
+  const cap = monthlyCapHours(reqYear)
+
   return (
     <div className="p-4 md:p-7 max-w-4xl mx-auto">
       <Link href="/supervisor/supervisees" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
@@ -185,6 +205,16 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
           {totalHours.toFixed(1)} / {targetHours} hours
           {traineeProfile?.fieldwork_start_date && ` · Started ${formatDate(traineeProfile.fieldwork_start_date)}`}
         </p>
+      </div>
+
+      {/* Monthly breakdown — same view as the trainee's own MSP tab */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-zinc-900">{monthLabel} Breakdown</h3>
+          <MonthSelect value={selectedMonth} onChange={setSelectedMonth} />
+        </div>
+        <MonthlyBreakdown m={m} monthLabel={monthLabel} supCls={supCls}
+          reqContacts={reqContacts} reqObs={reqObs} obsMet={obsMet} cap={cap} />
       </div>
 
       {/* Recent activities */}

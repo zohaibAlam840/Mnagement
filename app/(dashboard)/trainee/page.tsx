@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Bell, CalendarCheck, TrendingUp, Clock, AlertTriangle, ChevronRight, CheckCircle2, Circle, Info, Eye, Users } from "lucide-react"
+import { Bell, CalendarCheck, TrendingUp, Clock, AlertTriangle, ChevronRight, CheckCircle2, Circle, Info } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -13,6 +13,8 @@ import {
   RESTRICTED_MAX_PCT, GROUP_SUPERVISION_MAX_PCT, CONCENTRATED_MULTIPLIER,
   type FieldworkType, type RequirementsYear,
 } from "@/lib/bacb"
+import MonthlyBreakdown from "@/components/dashboard/MonthlyBreakdown"
+import MonthSelect, { currentMonthValue, monthLabelFor } from "@/components/dashboard/MonthSelect"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type TraineeProfile = Database["public"]["Tables"]["trainee_profiles"]["Row"]
@@ -26,30 +28,6 @@ function formatTime(t: string) {
   return `${hr % 12 || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`
 }
 
-function Ring({ percent, ringColor, centerColor, label, footer }: {
-  percent: number; ringColor: string; centerColor: string; label: string; footer: string
-}) {
-  const radius = 36
-  const circumference = 2 * Math.PI * radius
-  const fill = (Math.min(percent, 100) / 100) * circumference
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="relative w-24 h-24">
-        <svg className="w-full h-full -rotate-90" viewBox="0 0 96 96">
-          <circle cx="48" cy="48" r={radius} fill="none" stroke="#f3f4f6" strokeWidth="8" />
-          <circle cx="48" cy="48" r={radius} fill="none" stroke={ringColor} strokeWidth="8"
-            strokeDasharray={circumference} strokeDashoffset={circumference - fill} strokeLinecap="round" />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className={cn("text-lg font-bold", centerColor)}>{percent}%</span>
-          <span className="text-[9px] text-zinc-400 text-center leading-tight">{label}</span>
-        </div>
-      </div>
-      <span className="text-[10px] font-medium text-center text-zinc-500">{footer}</span>
-    </div>
-  )
-}
-
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 export default function TraineeDashboard() {
@@ -59,6 +37,7 @@ export default function TraineeDashboard() {
   const [activities, setActivities] = useState<ActivityRow[]>([])
   const [supervisorStatus, setSupervisorStatus] = useState<"none" | "pending" | "active">("none")
   const [tab, setTab] = useState<"msp" | "total">("msp")
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthValue())
 
   useEffect(() => {
     async function load() {
@@ -87,11 +66,10 @@ export default function TraineeDashboard() {
   const fieldworkType = (traineeProfile?.fieldwork_type ?? "concentrated") as FieldworkType
   const reqYear = (traineeProfile?.requirements_year ?? "both") as RequirementsYear
 
-  // --- Monthly (MSP) metrics ---
+  // --- Monthly (MSP) metrics — for whichever month is selected in the dropdown ---
   const now = new Date()
-  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-  const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" })
-  const m = computeMetrics(inMonth(activities, ym))
+  const monthLabel = monthLabelFor(selectedMonth)
+  const m = computeMetrics(inMonth(activities, selectedMonth))
   const supColor = supervisionColor(m.supervisionPct)
   const supCls = RATIO_COLOR_CLASS[supColor]
   const minSup = minSupervisionPct(fieldworkType, reqYear)
@@ -193,21 +171,26 @@ export default function TraineeDashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-zinc-100 rounded-xl mb-5 w-full md:w-auto md:inline-flex">
-        <button
-          onClick={() => setTab("msp")}
-          className={cn("flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-            tab === "msp" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}
-        >
-          {monthLabel} (MSP)
-        </button>
-        <button
-          onClick={() => setTab("total")}
-          className={cn("flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-            tab === "total" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}
-        >
-          Total Fieldwork
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex gap-1 p-1 bg-zinc-100 rounded-xl w-full sm:w-auto sm:inline-flex">
+          <button
+            onClick={() => setTab("msp")}
+            className={cn("flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              tab === "msp" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}
+          >
+            {monthLabel} (MSP)
+          </button>
+          <button
+            onClick={() => setTab("total")}
+            className={cn("flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              tab === "total" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}
+          >
+            Total Fieldwork
+          </button>
+        </div>
+        {tab === "msp" && (
+          <MonthSelect value={selectedMonth} onChange={setSelectedMonth} />
+        )}
       </div>
 
       {/* Supervisor status banner */}
@@ -248,7 +231,7 @@ export default function TraineeDashboard() {
       )}
 
       {tab === "msp" ? (
-        <MspView m={m} monthLabel={monthLabel} supCls={supCls} supColor={supColor} minSup={minSup}
+        <MonthlyBreakdown m={m} monthLabel={monthLabel} supCls={supCls}
           reqContacts={reqContacts} reqObs={reqObs} obsMet={obsMet} cap={cap} />
       ) : (
         <TotalView t={t} targetHours={targetHours} progressPercent={progressPercent}
@@ -291,101 +274,6 @@ export default function TraineeDashboard() {
         )}
       </div>
     </div>
-  )
-}
-
-// --- Monthly (MSP) view -------------------------------------------------------
-function MspView({ m, monthLabel, supCls, supColor, minSup, reqContacts, reqObs, obsMet, cap }: {
-  m: ReturnType<typeof computeMetrics>
-  monthLabel: string
-  supCls: typeof RATIO_COLOR_CLASS[keyof typeof RATIO_COLOR_CLASS]
-  supColor: ReturnType<typeof supervisionColor>
-  minSup: number
-  reqContacts: number
-  reqObs: ReturnType<typeof requiredObservation>
-  obsMet: boolean
-  cap: number
-}) {
-  const supervisedH = Math.round((m.individualSupH + m.groupSupH) * 10) / 10
-  const unsupervisedH = Math.round((m.restrictedH + m.unrestrictedH) * 10) / 10
-  return (
-    <>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        {[
-          { label: "Total This Month", value: `${m.totalH}h`, sub: `cap ${cap}h`, color: "text-violet-600", icon: Clock },
-          { label: "Supervised Hours", value: `${supervisedH}h`, sub: `ind ${m.individualSupH} · grp ${m.groupSupH}`, color: "text-emerald-600", icon: Users },
-          { label: "Unsupervised Hours", value: `${unsupervisedH}h`, sub: `restricted + unrestricted`, color: "text-blue-600", icon: TrendingUp },
-          { label: "Supervision %", value: `${m.supervisionPct}%`, sub: supCls.label, color: supCls.text, icon: CheckCircle2 },
-        ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-zinc-400">{s.label}</span>
-              <s.icon className={cn("w-3.5 h-3.5", s.color)} />
-            </div>
-            <p className={cn("text-2xl font-bold", s.label === "Supervision %" ? s.color : "text-zinc-900")}>{s.value}</p>
-            <p className="text-[11px] text-zinc-400 mt-0.5">{s.sub}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid md:grid-cols-3 gap-5">
-        {/* Ratios */}
-        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-          <h2 className="font-semibold text-zinc-900 text-sm mb-1">Monthly Ratios</h2>
-          <p className="text-xs text-zinc-400 mb-5">{monthLabel} · supervision evaluated monthly</p>
-          <div className="flex items-center justify-around">
-            <Ring percent={m.supervisionPct} ringColor={supCls.ring} centerColor={supCls.text} label="Supervision" footer={supCls.label} />
-            <Ring percent={m.groupSupPct} ringColor={m.groupSupPct > GROUP_SUPERVISION_MAX_PCT ? "#EF4444" : "#3B82F6"}
-              centerColor={m.groupSupPct > GROUP_SUPERVISION_MAX_PCT ? "text-red-600" : "text-blue-600"} label="Group" footer={`Max ${GROUP_SUPERVISION_MAX_PCT}%`} />
-          </div>
-          <div className="mt-4 pt-4 border-t border-zinc-100 text-[11px] text-zinc-500 leading-relaxed">
-            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" /> &lt;5% critical</span>{"  "}
-            <span className="inline-flex items-center gap-1 ml-2"><span className="w-2 h-2 rounded-full bg-amber-400" /> 5% supervised</span>{"  "}
-            <span className="inline-flex items-center gap-1 ml-2"><span className="w-2 h-2 rounded-full bg-emerald-400" /> 10% concentrated</span>
-          </div>
-        </div>
-
-        {/* Contacts + Observations */}
-        <div className="md:col-span-2 bg-white rounded-xl border border-[#E8E6F4] p-5">
-          <h2 className="font-semibold text-zinc-900 text-sm mb-4">Monthly Contacts & Observations</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div className={cn("rounded-xl border p-4", m.contacts >= reqContacts ? "bg-emerald-50 border-emerald-100" : "bg-amber-50 border-amber-100")}>
-              <div className="flex items-center gap-2 mb-1">
-                <Users className={cn("w-4 h-4", m.contacts >= reqContacts ? "text-emerald-600" : "text-amber-600")} />
-                <span className="text-xs font-semibold text-zinc-700">Contacts</span>
-              </div>
-              <p className="text-2xl font-bold text-zinc-900">{m.contacts}<span className="text-sm font-medium text-zinc-400"> / {reqContacts}</span></p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">{m.individualMeetings} individual + {m.groupMeetings} group + {m.obsCount} observation</p>
-            </div>
-            <div className={cn("rounded-xl border p-4", obsMet ? "bg-emerald-50 border-emerald-100" : "bg-amber-50 border-amber-100")}>
-              <div className="flex items-center gap-2 mb-1">
-                <Eye className={cn("w-4 h-4", obsMet ? "text-emerald-600" : "text-amber-600")} />
-                <span className="text-xs font-semibold text-zinc-700">Observations</span>
-              </div>
-              <p className="text-2xl font-bold text-zinc-900">
-                {m.obsCount}<span className="text-sm font-medium text-zinc-400"> {m.obsCount === 1 ? "contact" : "contacts"}</span>
-              </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">
-                {m.obsMinutes} min logged · {reqObs.kind === "count" ? `${reqObs.value} required` : `${reqObs.value} min required`}
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-            {[
-              { label: "Restricted", value: `${m.restrictedH}h`, note: `${m.restrictedPct}% (not capped monthly)` },
-              { label: "Unrestricted", value: `${m.unrestrictedH}h`, note: "coordination etc." },
-              { label: "Supervision", value: `${m.supervisionH}h`, note: `${m.supervisionPct}% of total` },
-            ].map((b) => (
-              <div key={b.label} className="bg-zinc-50 rounded-lg py-3">
-                <p className="text-lg font-bold text-zinc-900">{b.value}</p>
-                <p className="text-[10px] text-zinc-400">{b.label}</p>
-                <p className="text-[10px] text-zinc-400 mt-0.5">{b.note}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
   )
 }
 

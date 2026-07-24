@@ -189,12 +189,14 @@ export default function ReportsPage() {
               ? (r.requirements_year === "2022" ? 10 : 7.5)
               : 5
             const status = getComplianceStatus(r)
-            const isCurrentMonth = r.month === new Date().toISOString().slice(0, 7)
+            // r.month comes back from Postgres as a full date ("YYYY-MM-DD").
+            const monthKey = r.month.slice(0, 7)
+            const isCurrentMonth = monthKey === new Date().toISOString().slice(0, 7)
 
             return (
               <Link
                 key={r.id}
-                href={`/trainee/reports/${r.month}`}
+                href={`/trainee/reports/${monthKey}`}
                 className="block bg-white rounded-xl border border-[#E8E6F4] hover:border-violet-200 hover:shadow-sm transition-all"
               >
                 <div className="p-4">

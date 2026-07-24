@@ -63,10 +63,11 @@ export default function SignOffPage() {
   const monthOptions = getLast12Months()
 
   // Check if the currently selected trainee+month combination is already signed (locked)
+  // s.month comes back from Postgres as a full date ("YYYY-MM-DD"); genMonth is "YYYY-MM".
   const lockedRecord = useMemo(() => {
     if (!genTraineeId || !genMonth) return null
     return summaries.find(
-      s => s.trainee_id === genTraineeId && s.month === genMonth && !!s.supervisor_signed_at
+      s => s.trainee_id === genTraineeId && s.month.slice(0, 7) === genMonth && !!s.supervisor_signed_at
     ) ?? null
   }, [summaries, genTraineeId, genMonth])
 
@@ -236,7 +237,7 @@ export default function SignOffPage() {
       const payload = {
         trainee_id: genTraineeId,
         supervisor_id: supervisorId,
-        month: genMonth,
+        month: monthStart,
         fieldwork_type: fieldworkType,
         requirements_year: reqYear,
         total_hours: totalH,
@@ -258,7 +259,7 @@ export default function SignOffPage() {
         .select("id, supervisor_signed_at")
         .eq("trainee_id", genTraineeId)
         .eq("supervisor_id", supervisorId)
-        .eq("month", genMonth)
+        .eq("month", monthStart)
         .maybeSingle()
 
       if (existing?.supervisor_signed_at) {

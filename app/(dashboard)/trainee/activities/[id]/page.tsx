@@ -10,6 +10,7 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { ACTIVITY_KINDS, kindToFields, rowToKind, type ActivityKind } from "@/lib/activityKind"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 
@@ -36,9 +37,8 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
   // Editable fields
   const [title, setTitle] = useState("")
   const [notes, setNotes] = useState("")
-  const [category, setCategory] = useState<ActivityRow["category"]>("Restricted")
-  const [sessionType, setSessionType] = useState<"individual" | "group" | null>(null)
-  const [observationType, setObservationType] = useState<"direct" | "remote" | "indirect" | null>(null)
+  const [kind, setKind] = useState<ActivityKind>("Restricted")
+  const [observationType, setObservationType] = useState<"direct" | "remote" | "indirect">("direct")
   const [observationMinutes, setObservationMinutes] = useState(0)
 
   useEffect(() => {
@@ -58,9 +58,8 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       setActivity(data)
       setTitle(data.title)
       setNotes(data.notes ?? "")
-      setCategory(data.category)
-      setSessionType(data.session_type ?? null)
-      setObservationType(data.observation_type ?? null)
+      setKind(rowToKind(data))
+      setObservationType(data.observation_type ?? "direct")
       setObservationMinutes(data.observation_duration_minutes ?? 0)
       setLoading(false)
     }
@@ -71,15 +70,14 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
     if (!activity) return
     setSaving(true)
     const supabase = createClient()
+    const fields = kindToFields(kind, observationMinutes)
     const { data } = await supabase
       .from("activities")
       .update({
         title,
         notes: notes || null,
-        category,
-        session_type: category === "Supervision" ? sessionType : null,
-        observation_type: observationType,
-        observation_duration_minutes: observationMinutes,
+        ...fields,
+        observation_type: kind === "Observation" ? observationType : null,
       })
       .eq("id", activity.id)
       .select()
@@ -147,7 +145,14 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
           {editing ? (
             <>
               <button
-                onClick={() => { setEditing(false); setTitle(activity.title); setNotes(activity.notes ?? ""); setCategory(activity.category) }}
+                onClick={() => {
+                  setEditing(false)
+                  setTitle(activity.title)
+                  setNotes(activity.notes ?? "")
+                  setKind(rowToKind(activity))
+                  setObservationType(activity.observation_type ?? "direct")
+                  setObservationMinutes(activity.observation_duration_minutes ?? 0)
+                }}
                 className="w-9 h-9 rounded-lg border border-zinc-200 flex items-center justify-center text-zinc-500 hover:bg-zinc-50 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -190,13 +195,13 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
         )}>
           {editing ? (
             <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as ActivityRow["category"])}
+              value={kind}
+              onChange={(e) => setKind(e.target.value as ActivityKind)}
               className="bg-transparent focus:outline-none text-xs font-semibold"
             >
-              <option>Restricted</option>
-              <option>Unrestricted</option>
-              <option>Supervision</option>
+              {ACTIVITY_KINDS.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
             </select>
           ) : activity.category}
         </span>
@@ -245,35 +250,17 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
               ✓ Supervision-related
             </span>
           )}
-          {activity.category === "Supervision" && (
-            editing ? (
-              <div className="w-full flex gap-2 mt-1">
-                {(["individual", "group"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setSessionType(t)}
-                    className={cn(
-                      "flex-1 py-2 text-xs font-semibold rounded-lg border capitalize transition-all",
-                      sessionType === t ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-zinc-200 text-zinc-500"
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            ) : activity.session_type ? (
+          {editing ? (
+            kind === "Individual Supervision" || kind === "Group Supervision" ? (
               <span className={cn(
                 "text-xs font-semibold px-3 py-1.5 rounded-full border capitalize",
-                activity.session_type === "individual"
+                kind === "Individual Supervision"
                   ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                   : "bg-blue-50 text-blue-700 border-blue-100"
               )}>
-                {activity.session_type} supervision
+                {kind === "Individual Supervision" ? "Individual" : "Group"} supervision
               </span>
-            ) : null
-          )}
-          {activity.observation_with_client && (
-            editing ? (
+            ) : kind === "Observation" ? (
               <div className="w-full space-y-2 mt-1">
                 <div className="flex gap-2">
                   {(["direct", "remote", "indirect"] as const).map((t) => (
@@ -299,22 +286,38 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
                 />
               </div>
             ) : (
-              <>
-                {activity.observation_type && (
-                  <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100 capitalize">
-                    {activity.observation_type} observation
-                  </span>
-                )}
-                {activity.observation_duration_minutes > 0 && (
-                  <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
-                    {activity.observation_duration_minutes} min
-                  </span>
-                )}
-              </>
+              <span className="text-xs text-zinc-400 italic">No supervision flags</span>
             )
-          )}
-          {!activity.supervision_present && !activity.observation_with_client && activity.category !== "Supervision" && (
-            <span className="text-xs text-zinc-400 italic">No supervision flags</span>
+          ) : (
+            <>
+              {activity.category === "Supervision" && activity.session_type && (
+                <span className={cn(
+                  "text-xs font-semibold px-3 py-1.5 rounded-full border capitalize",
+                  activity.session_type === "individual"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                    : "bg-blue-50 text-blue-700 border-blue-100"
+                )}>
+                  {activity.session_type} supervision
+                </span>
+              )}
+              {activity.observation_with_client && (
+                <>
+                  {activity.observation_type && (
+                    <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100 capitalize">
+                      {activity.observation_type} observation
+                    </span>
+                  )}
+                  {activity.observation_duration_minutes > 0 && (
+                    <span className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
+                      {activity.observation_duration_minutes} min
+                    </span>
+                  )}
+                </>
+              )}
+              {!activity.supervision_present && !activity.observation_with_client && activity.category !== "Supervision" && (
+                <span className="text-xs text-zinc-400 italic">No supervision flags</span>
+              )}
+            </>
           )}
         </div>
       </div>

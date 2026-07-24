@@ -37,11 +37,17 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // "month" (the route param) is "YYYY-MM"; the DB column is a full date,
+      // always stored as the 1st of the month.
+      const monthStart = `${month}-01`
+      const [y, mo] = month.split("-").map(Number)
+      const nextMonth = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, "0")}-01`
+
       const { data: sRaw } = await supabase
         .from("monthly_summaries")
         .select("*")
         .eq("trainee_id", user.id)
-        .eq("month", month)
+        .eq("month", monthStart)
         .single()
       const s = sRaw as MonthlySummary | null
 
@@ -55,9 +61,6 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
 
       // Contacts/meeting counts aren't stored on the summary, so compute them
       // live from the month's non-draft activities.
-      const monthStart = `${month}-01`
-      const [y, mo] = month.split("-").map(Number)
-      const nextMonth = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, "0")}-01`
       const { data: actsRaw } = await (supabase as any)
         .from("activities")
         .select("duration_minutes, category, session_type, observation_with_client, observation_duration_minutes")

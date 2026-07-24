@@ -9,6 +9,7 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { kindToFields, type ActivityKind } from "@/lib/activityKind"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
@@ -29,33 +30,12 @@ type GCalEvent = {
   status?: string
 }
 
-type ImportKind =
-  | "Restricted"
-  | "Unrestricted"
-  | "Group Supervision"
-  | "Individual Supervision"
-  | "Observation"
+type ImportKind = ActivityKind
 
 type ImportItem = {
   event: GCalEvent
   kind: ImportKind
   selected: boolean
-}
-
-// Map a calendar-import choice to the structured activity fields the DB stores.
-function kindToFields(kind: ImportKind, durationMins: number) {
-  switch (kind) {
-    case "Restricted":
-      return { category: "Restricted" as const, session_type: null, supervision_present: false, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
-    case "Unrestricted":
-      return { category: "Unrestricted" as const, session_type: null, supervision_present: false, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
-    case "Group Supervision":
-      return { category: "Supervision" as const, session_type: "group" as const, supervision_present: true, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
-    case "Individual Supervision":
-      return { category: "Supervision" as const, session_type: "individual" as const, supervision_present: true, observation_with_client: false, observation_type: null, observation_duration_minutes: 0 }
-    case "Observation":
-      return { category: "Supervision" as const, session_type: null, supervision_present: true, observation_with_client: true, observation_type: "direct" as const, observation_duration_minutes: durationMins }
-  }
 }
 
 function toLocalDateStr(d: Date): string {
