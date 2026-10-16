@@ -8,6 +8,10 @@ export type ReviewStatus = "draft" | "submitted" | "approved" | "rejected"
 export type SessionType = "individual" | "group"
 export type ObservationType = "direct" | "remote" | "indirect"
 export type RelationshipStatus = "pending" | "active" | "ended"
+export type AdminLevel = "admin" | "director"
+export type MvfFormType = "organization" | "individual"
+export type UnlockScope = "week" | "month"
+export type UnlockRequestStatus = "pending" | "approved" | "denied" | "cancelled"
 
 export interface Database {
   public: {
@@ -21,6 +25,7 @@ export interface Database {
           role: UserRole
           timezone: string
           avatar_url: string | null
+          admin_level: AdminLevel | null
           created_at: string
           updated_at: string
         }
@@ -36,6 +41,8 @@ export interface Database {
           fieldwork_start_date: string | null
           target_hours: number
           bacb_id: string | null
+          fieldwork_state: string | null
+          fieldwork_country: string | null
           created_at: string
           updated_at: string
         }
@@ -129,6 +136,9 @@ export interface Database {
           submitted_at: string | null
           reviewed_at: string | null
           supervisor_notes: string | null
+          unlocked_at: string | null
+          unlocked_by: string | null
+          unlock_note: string | null
           created_at: string
           updated_at: string
         }
@@ -176,11 +186,57 @@ export interface Database {
           status: string
           trainee_signed_at: string | null
           supervisor_signed_at: string | null
+          form_type: MvfFormType
+          form_fields: Record<string, string>
+          supervisor_signature: string | null
+          trainee_signature: string | null
+          pdf_path: string | null
+          pdf_generated_at: string | null
+          generated_by: string | null
+          unlocked_at: string | null
           created_at: string
           updated_at: string
         }
         Insert: Omit<Database["public"]["Tables"]["monthly_summaries"]["Row"], "id" | "created_at" | "updated_at">
         Update: Partial<Database["public"]["Tables"]["monthly_summaries"]["Insert"]>
+      }
+      final_verifications: {
+        Row: {
+          id: string
+          trainee_id: string
+          supervisor_id: string
+          form_type: MvfFormType
+          start_month: string
+          end_month: string
+          form_fields: Record<string, string>
+          months_included: string[]
+          status: string
+          supervisor_signature: string | null
+          supervisor_signed_at: string | null
+          pdf_path: string | null
+          pdf_generated_at: string | null
+          generated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["final_verifications"]["Row"], "id" | "created_at" | "updated_at">
+        Update: Partial<Database["public"]["Tables"]["final_verifications"]["Insert"]>
+      }
+      unlock_requests: {
+        Row: {
+          id: string
+          trainee_id: string
+          scope: UnlockScope
+          period_start: string
+          reason: string | null
+          status: UnlockRequestStatus
+          response_note: string | null
+          resolved_by: string | null
+          resolved_at: string | null
+          created_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["unlock_requests"]["Row"], "id" | "created_at">
+        Update: Partial<Database["public"]["Tables"]["unlock_requests"]["Insert"]>
       }
       notifications: {
         Row: {

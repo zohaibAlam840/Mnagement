@@ -7,6 +7,7 @@ import { SignOutButton } from "@/components/auth/SignOutButton"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { AdminConsoleLink, FieldworkDetails } from "@/components/settings/FieldworkDetails"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type TraineeProfile = Database["public"]["Tables"]["trainee_profiles"]["Row"]
@@ -178,6 +179,9 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      <AdminConsoleLink />
+      <FieldworkDetails />
 
       {/* Settings list */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] overflow-hidden mb-5">

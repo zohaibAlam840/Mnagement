@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   ChevronLeft, CheckCircle2, Clock, Pencil, Trash2,
-  Save, X, AlertTriangle, User, Calendar, AlarmClock
+  Save, X, AlertTriangle, User, Calendar, AlarmClock, Lock
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
 import { ACTIVITY_KINDS, kindToFields, rowToKind, type ActivityKind } from "@/lib/activityKind"
+import { api } from "@/lib/api"
+import { formatWeekRange, weekStartOf } from "@/lib/period"
+import { RequestUnlock, type UnlockRequestRow } from "@/components/unlock/UnlockControls"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 
@@ -33,6 +36,10 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [actionError, setActionError] = useState("")
+  const [weekApproved, setWeekApproved] = useState(false)
+  const [unlockRequest, setUnlockRequest] = useState<UnlockRequestRow | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Editable fields
   const [title, setTitle] = useState("")
@@ -61,17 +68,29 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       setKind(rowToKind(data))
       setObservationType(data.observation_type ?? "direct")
       setObservationMinutes(data.observation_duration_minutes ?? 0)
+
+      const ws = weekStartOf(data.date)
+      const { data: rev } = await supabase.from("weekly_reviews").select("status")
+        .eq("trainee_id", user.id).eq("week_start_date", ws).maybeSingle()
+      setWeekApproved((rev as { status?: string } | null)?.status === "approved")
+      try {
+        const { requests } = await api<{ requests: UnlockRequestRow[] }>(`/api/unlock-requests?traineeId=${user.id}`)
+        setUnlockRequest(requests.find(r => r.scope === "week" && r.period_start === ws) ?? null)
+      } catch {
+        setUnlockRequest(null)
+      }
       setLoading(false)
     }
     load()
-  }, [id])
+  }, [id, reloadKey])
 
   const handleSave = async () => {
     if (!activity) return
     setSaving(true)
     const supabase = createClient()
     const fields = kindToFields(kind, observationMinutes)
-    const { data } = await supabase
+    setActionError("")
+    const { data, error } = await supabase
       .from("activities")
       .update({
         title,
@@ -82,8 +101,9 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       .eq("id", activity.id)
       .select()
       .single()
-    if (data) setActivity(data)
     setSaving(false)
+    if (error) { setActionError(error.message); return }
+    if (data) setActivity(data)
     setEditing(false)
   }
 
@@ -91,8 +111,10 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
     if (!activity) return
     if (!confirm("Delete this activity? This cannot be undone.")) return
     setDeleting(true)
+    setActionError("")
     const supabase = createClient()
-    await supabase.from("activities").delete().eq("id", activity.id)
+    const { error } = await supabase.from("activities").delete().eq("id", activity.id)
+    if (error) { setActionError(error.message); setDeleting(false); return }
     router.push("/trainee/activities")
   }
 
@@ -116,6 +138,7 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
   }
 
   const durationHours = activity.duration_minutes / 60
+  const locked = activity.status === "approved" || weekApproved
 
   return (
     <div className="p-4 md:p-7 max-w-2xl mx-auto">
@@ -165,6 +188,10 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
                 <Save className="w-4 h-4" />
               </button>
             </>
+          ) : locked ? (
+            <span className="flex items-center gap-1 text-xs font-semibold text-zinc-600 bg-zinc-100 border border-zinc-200 px-2.5 py-1.5 rounded-lg">
+              <Lock className="w-3.5 h-3.5" /> Locked
+            </span>
           ) : (
             <>
               <button
@@ -184,6 +211,26 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </div>
+
+      {locked && !editing && (
+        <div className="flex items-start gap-3 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 mb-5">
+          <Lock className="w-4 h-4 text-zinc-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-zinc-800">Approved and locked</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              The week of {formatWeekRange(weekStartOf(activity.date))} is approved. To change this activity, ask your supervisor to unlock the week.
+            </p>
+            {weekApproved && (
+              <RequestUnlock scope="week" period={weekStartOf(activity.date)} pending={unlockRequest} onChange={() => setReloadKey(k => k + 1)} className="mt-2.5 w-fit" />
+            )}
+          </div>
+        </div>
+      )}
+      {actionError && (
+        <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5 mb-5">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /> {actionError}
+        </div>
+      )}
 
       {/* Status badges */}
       <div className="flex items-center gap-2 mb-5">

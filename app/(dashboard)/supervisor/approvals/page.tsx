@@ -6,6 +6,7 @@ import { ChevronRight, CheckCircle2, Clock, XCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { UnlockRequestsList } from "@/components/unlock/UnlockRequestsList"
 
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"]
@@ -40,6 +41,7 @@ export default function ApprovalsPage() {
   const [pending, setPending] = useState<ReviewWithProfile[]>([])
   const [reviewed, setReviewed] = useState<ReviewWithProfile[]>([])
   const [loading, setLoading] = useState(true)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -60,7 +62,7 @@ export default function ApprovalsPage() {
         .from("weekly_reviews")
         .select("*")
         .eq("supervisor_id", user.id)
-        .in("status", ["approved", "rejected"])
+        .in("status", ["approved", "rejected", "draft"])
         .order("reviewed_at", { ascending: false })
         .limit(20)
 
@@ -87,7 +89,7 @@ export default function ApprovalsPage() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [reloadKey])
 
   if (loading) {
     return (
@@ -107,6 +109,8 @@ export default function ApprovalsPage() {
           </p>
         </div>
       </div>
+
+      <UnlockRequestsList onChange={() => setReloadKey(k => k + 1)} />
 
       {/* Pending */}
       {pending.length > 0 && (
@@ -194,7 +198,11 @@ export default function ApprovalsPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-zinc-700">{name}</p>
-                    <p className="text-xs text-zinc-400">{formatWeekRange(item.week_start_date)}</p>
+                    <p className="text-xs text-zinc-400">
+                      {formatWeekRange(item.week_start_date)}
+                      {item.status === "draft" && item.unlocked_at && " · unlocked for edits"}
+                      {item.status === "approved" && " · locked"}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-zinc-500">{item.total_hours.toFixed(1)}h</span>

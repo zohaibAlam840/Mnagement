@@ -6,6 +6,8 @@ import { Download, ChevronRight, CheckCircle2, AlertTriangle, Clock, FileText } 
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { formatMonthLabel, monthOf, toDateStr } from "@/lib/period"
+import { FvfPanel } from "@/components/mvf/FvfPanel"
 
 type MonthlySummary = Database["public"]["Tables"]["monthly_summaries"]["Row"]
 
@@ -53,6 +55,12 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [liveMonth, setLiveMonth] = useState<LiveMonth | null>(null)
   const [currentMonthLabel, setCurrentMonthLabel] = useState("")
+  const monthChoices = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date()
+    return monthOf(toDateStr(new Date(d.getFullYear(), d.getMonth() - i, 1)))
+  })
+  const [pickMonth, setPickMonth] = useState(monthChoices[1])
+  const [userId, setUserId] = useState("")
 
   useEffect(() => {
     async function load() {
@@ -68,6 +76,7 @@ export default function ReportsPage() {
       const monthEnd = `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, "0")}-01`
       setCurrentMonthLabel(now.toLocaleDateString("en-US", { month: "long", year: "numeric" }))
 
+      setUserId(user.id)
       const [sumsRes, tpRes, actsRes] = await Promise.all([
         supabase.from("monthly_summaries").select("*").eq("trainee_id", user.id).order("month", { ascending: false }),
         supabase.from("trainee_profiles").select("target_hours").eq("id", user.id).single(),
@@ -172,12 +181,33 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* Verification form for any month */}
+      <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
+        <p className="text-sm font-semibold text-zinc-900">Monthly Verification Form (MVF)</p>
+        <p className="text-xs text-zinc-400 mt-0.5 mb-3">Open a month to review its logged hours, generate the BACB form once hours are approved, sign it and download it.</p>
+        <div className="flex gap-2">
+          <select
+            value={pickMonth}
+            onChange={(e) => setPickMonth(e.target.value)}
+            className="flex-1 border border-zinc-200 rounded-lg px-3 py-2 text-sm text-zinc-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-200"
+          >
+            {monthChoices.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+          </select>
+          <Link href={`/trainee/reports/${pickMonth}`} className="flex items-center gap-1.5 bg-violet-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-violet-700">
+            Open <ChevronRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Final form (end of fieldwork) */}
+      {userId && <div className="mb-5"><FvfPanel traineeId={userId} /></div>}
+
       {/* Monthly list */}
       {summaries.length === 0 ? (
         <div className="bg-white rounded-xl border border-[#E8E6F4] py-16 text-center">
           <FileText className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
           <p className="text-sm font-medium text-zinc-700 mb-1">No reports yet</p>
-          <p className="text-xs text-zinc-400">MSP records appear here once your supervisor generates your Monthly Supervisory Period report.</p>
+          <p className="text-xs text-zinc-400">Forms appear here once you or your supervisor generate a month&apos;s verification form.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -258,9 +288,11 @@ export default function ReportsPage() {
                   </div>
 
                   <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-zinc-50">
-                    {r.supervisor_signed_at
-                      ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /><span className="text-xs text-zinc-500">Supervisor signed</span></>
-                      : <><Clock className="w-3.5 h-3.5 text-zinc-300" /><span className="text-xs text-zinc-400">Awaiting supervisor signature</span></>
+                    {r.supervisor_signed_at && r.trainee_signed_at
+                      ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /><span className="text-xs text-zinc-500">MVF signed by both · locked</span></>
+                      : !r.pdf_path
+                        ? <><AlertTriangle className="w-3.5 h-3.5 text-amber-500" /><span className="text-xs text-amber-600">Unlocked · needs regenerating</span></>
+                        : <><Clock className="w-3.5 h-3.5 text-zinc-300" /><span className="text-xs text-zinc-400">Awaiting {r.supervisor_signed_at ? "your" : r.trainee_signed_at ? "supervisor" : "both"} signature{r.supervisor_signed_at || r.trainee_signed_at ? "" : "s"}</span></>
                     }
                   </div>
                 </div>

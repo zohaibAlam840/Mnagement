@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react"
 import Link from "next/link"
-import { ChevronLeft, Download, CheckCircle2, AlertTriangle, Clock, FileSignature, Lock, Users, Eye } from "lucide-react"
+import { ChevronLeft, CheckCircle2, AlertTriangle, Clock, Lock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
@@ -11,9 +11,10 @@ import {
   requiredContacts, requiredObservation, supervisionColor, RATIO_COLOR_CLASS,
   GROUP_SUPERVISION_MAX_PCT, type FieldworkType, type RequirementsYear,
 } from "@/lib/bacb"
+import { MvfPanel } from "@/components/mvf/MvfPanel"
+import { ActivityLog } from "@/components/activity/ActivityLog"
 
 type MonthlySummary = Database["public"]["Tables"]["monthly_summaries"]["Row"]
-type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type ContactBreakdown = { individualMeetings: number; groupMeetings: number; obsCount: number; contacts: number }
 
 function formatMonth(m: string) {
@@ -25,17 +26,17 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
   const { month } = use(params)
 
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
-  const [supervisor, setSupervisor] = useState<Profile | null>(null)
   const [contacts, setContacts] = useState<ContactBreakdown | null>(null)
   const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
-  const [traineeSigningInProgress, setTraineeSigningInProgress] = useState(false)
+  const [userId, setUserId] = useState("")
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      setUserId(user.id)
 
       // "month" (the route param) is "YYYY-MM"; the DB column is a full date,
       // always stored as the 1st of the month.
@@ -48,16 +49,9 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         .select("*")
         .eq("trainee_id", user.id)
         .eq("month", monthStart)
-        .single()
-      const s = sRaw as MonthlySummary | null
-
-      if (!s) { setNotFound(true); setLoading(false); return }
-      setSummary(s)
-
-      if (s.supervisor_id) {
-        const { data: supRaw } = await supabase.from("profiles").select("*").eq("id", s.supervisor_id).single()
-        if (supRaw) setSupervisor(supRaw as Profile)
-      }
+        .order("updated_at", { ascending: false })
+        .limit(1)
+      setSummary(((sRaw ?? [])[0] as MonthlySummary | undefined) ?? null)
 
       // Contacts/meeting counts aren't stored on the summary, so compute them
       // live from the month's non-draft activities.
@@ -79,7 +73,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
       setLoading(false)
     }
     load()
-  }, [month])
+  }, [month, reloadKey])
 
   if (loading) {
     return (
@@ -89,36 +83,24 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
     )
   }
 
-  if (notFound || !summary) {
+  const extras = userId ? (
+    <div className="space-y-5">
+      <MvfPanel traineeId={userId} month={month} onChange={() => setReloadKey(k => k + 1)} />
+      <ActivityLog traineeId={userId} linkToActivity initialMode="month" initialMonth={month} />
+    </div>
+  ) : null
+
+  if (!summary) {
     return (
-      <div className="p-4 md:p-7 max-w-2xl mx-auto text-center py-20">
-        <p className="text-zinc-400 mb-4">Report not found.</p>
-        <Link href="/trainee/reports" className="text-sm font-semibold text-violet-600 hover:text-violet-700">
-          ← Back to reports
+      <div className="p-4 md:p-7 max-w-3xl mx-auto">
+        <Link href="/trainee/reports" className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 mb-5 transition-colors">
+          <ChevronLeft className="w-4 h-4" /> MSP Reports
         </Link>
+        <h1 className="text-xl md:text-2xl font-bold text-zinc-900 mb-1">{formatMonth(month)}</h1>
+        <p className="text-sm text-zinc-500 mb-6">Monthly Supervisory Period (MSP) · BACB Fieldwork Verification</p>
+        {extras}
       </div>
     )
-  }
-
-  const handleDownloadPdf = () => {
-    const prevTitle = document.title
-    document.title = `BACB_Report_${month}`
-    window.print()
-    setTimeout(() => { document.title = prevTitle }, 1000)
-  }
-
-  const handleTraineeSign = async () => {
-    if (!summary) return
-    setTraineeSigningInProgress(true)
-    const supabase = createClient()
-    const { error } = await supabase
-      .from("monthly_summaries")
-      .update({ trainee_signed_at: new Date().toISOString() })
-      .eq("id", summary.id)
-    if (!error) {
-      setSummary({ ...summary, trainee_signed_at: new Date().toISOString() })
-    }
-    setTraineeSigningInProgress(false)
   }
 
   const ft = summary.fieldwork_type as FieldworkType
@@ -145,7 +127,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
   // entire experience, so it's shown for information only.
   const isCompliant = supervisionOk && groupOk && monthlyCapOk
 
-  const supervisorName = supervisor ? `${supervisor.first_name} ${supervisor.last_name}` : "Supervisor"
+  const isLocked = !!(summary.supervisor_signed_at && summary.trainee_signed_at)
 
   return (
     <div className="p-4 md:p-7 max-w-3xl mx-auto">
@@ -170,7 +152,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
           <p className="text-sm text-zinc-500 mt-0.5">Monthly Supervisory Period (MSP) · BACB Fieldwork Verification</p>
         </div>
         <div className="flex items-center gap-2">
-          {summary.supervisor_signed_at && (
+          {isLocked && (
             <span className="flex items-center gap-1 text-xs font-semibold text-zinc-600 bg-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-200">
               <Lock className="w-3.5 h-3.5" /> MSP Locked
             </span>
@@ -291,67 +273,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         </div>
       </div>
 
-      {/* Signatures */}
-      <div className={cn(
-        "rounded-xl border p-5 mb-5",
-        summary.supervisor_signed_at ? "bg-emerald-50 border-emerald-100" : "bg-white border-[#E8E6F4]"
-      )}>
-        <div className="flex items-center gap-3 mb-4">
-          <FileSignature className={cn("w-5 h-5 flex-shrink-0", summary.supervisor_signed_at ? "text-emerald-600" : "text-zinc-400")} />
-          <div>
-            <p className="text-sm font-semibold text-zinc-900">Supervisor Verification</p>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              {summary.supervisor_signed_at
-                ? `${supervisorName} signed on ${new Date(summary.supervisor_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
-                : `Awaiting review and signature from ${supervisorName}.`}
-            </p>
-          </div>
-          {summary.supervisor_signed_at
-            ? <CheckCircle2 className="w-5 h-5 text-emerald-500 ml-auto" />
-            : <Clock className="w-5 h-5 text-zinc-300 ml-auto" />
-          }
-        </div>
-
-        {summary.trainee_signed_at ? (
-          <div className="flex items-center gap-3 pt-4 border-t border-emerald-100">
-            <FileSignature className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-zinc-900">Trainee Verification</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                You signed on {new Date(summary.trainee_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-              </p>
-            </div>
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 ml-auto" />
-          </div>
-        ) : summary.supervisor_signed_at ? (
-          <div className="pt-4 border-t border-emerald-100 print-hide">
-            <p className="text-xs text-zinc-500 mb-3">Supervisor has signed. You can now add your own sign-off to confirm this report.</p>
-            <button
-              onClick={handleTraineeSign}
-              disabled={traineeSigningInProgress}
-              className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white font-semibold text-sm px-4 py-2 rounded-xl transition-colors"
-            >
-              {traineeSigningInProgress ? (
-                <span className="w-4 h-4 border-2 border-violet-200 border-t-white rounded-full animate-spin" />
-              ) : (
-                <FileSignature className="w-4 h-4" />
-              )}
-              {traineeSigningInProgress ? "Signing…" : "Sign Report"}
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Actions */}
-      <div className="print-hide flex gap-3">
-        <button
-          onClick={handleDownloadPdf}
-          className="flex-1 flex items-center justify-center gap-2 border border-[#E8E6F4] bg-white text-zinc-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-zinc-50 transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Download PDF
-        </button>
-      </div>
+      {extras}
     </div>
   )
 }

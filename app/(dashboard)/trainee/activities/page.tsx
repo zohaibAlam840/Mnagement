@@ -6,6 +6,7 @@ import { Plus, Search, MoreHorizontal, CheckCircle2, Circle, Clock } from "lucid
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { ActivityLog } from "@/components/activity/ActivityLog"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type Category = "All" | "Restricted" | "Unrestricted" | "Supervision"
@@ -43,12 +44,15 @@ export default function ActivitiesPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Category>("All")
   const [search, setSearch] = useState("")
+  const [view, setView] = useState<"list" | "history">("list")
+  const [userId, setUserId] = useState("")
 
   useEffect(() => {
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      setUserId(user.id)
       const { data } = await supabase
         .from("activities")
         .select("*")
@@ -90,6 +94,21 @@ export default function ActivitiesPage() {
         </Link>
       </div>
 
+      <div className="flex items-center bg-zinc-100 rounded-lg p-0.5 w-fit mb-5">
+        {([["list", "All entries"], ["history", "By week / month"]] as const).map(([v, label]) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={cn("text-xs font-semibold px-3 py-1.5 rounded-md", view === v ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "history" && userId && <ActivityLog traineeId={userId} linkToActivity />}
+
+      {view === "list" && <>
       {/* Search + filters */}
       <div className="flex flex-col sm:flex-row gap-3 mb-5">
         <div className="relative flex-1">
@@ -224,6 +243,7 @@ export default function ActivitiesPage() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }

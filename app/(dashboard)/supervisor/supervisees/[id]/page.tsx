@@ -13,6 +13,8 @@ import {
 } from "@/lib/bacb"
 import MonthlyBreakdown from "@/components/dashboard/MonthlyBreakdown"
 import MonthSelect, { currentMonthValue, monthLabelFor } from "@/components/dashboard/MonthSelect"
+import { ActivityLog } from "@/components/activity/ActivityLog"
+import { UnlockRequestsList } from "@/components/unlock/UnlockRequestsList"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type TraineeProfile = Database["public"]["Tables"]["trainee_profiles"]["Row"]
@@ -215,6 +217,12 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
         </div>
         <MonthlyBreakdown m={m} monthLabel={monthLabel} supCls={supCls}
           reqContacts={reqContacts} reqObs={reqObs} obsMet={obsMet} cap={cap} />
+      </div>
+
+      {/* Logged activities by week / month, incl. after approval */}
+      <UnlockRequestsList traineeId={id} />
+      <div className="mb-5">
+        <ActivityLog traineeId={id} canUnlock />
       </div>
 
       {/* Recent activities */}

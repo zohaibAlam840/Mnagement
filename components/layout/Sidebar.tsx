@@ -19,6 +19,7 @@ import {
   ClipboardList,
   ChevronRight,
   UserCheck,
+  ShieldCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SignOutButton } from "@/components/auth/SignOutButton"
@@ -38,6 +39,7 @@ const traineeNav: NavItem[] = [
 const supervisorNavBase: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/supervisor" },
   { label: "Supervisees", icon: Users, href: "/supervisor/supervisees" },
+  { label: "Activities", icon: Activity, href: "/supervisor/activities" },
   { label: "Approvals", icon: CheckSquare, href: "/supervisor/approvals" },
   { label: "Sessions", icon: Video, href: "/supervisor/sessions" },
   { label: "MSP Sign-Off", icon: FileText, href: "/supervisor/sign-off" },
@@ -55,6 +57,7 @@ export function Sidebar() {
 
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState("")
+  const [adminLevel, setAdminLevel] = useState<string | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
   const [pendingApprovals, setPendingApprovals] = useState(0)
 
@@ -65,15 +68,16 @@ export function Sidebar() {
       if (!user) return
 
       const [profileRes, unreadRes, approvalsRes] = await Promise.all([
-        supabase.from("profiles").select("first_name, last_name, role").eq("id", user.id).single(),
+        supabase.from("profiles").select("first_name, last_name, role, admin_level").eq("id", user.id).single(),
         supabase.from("notifications").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("read", false),
         supabase.from("weekly_reviews").select("*", { count: "exact", head: true }).eq("supervisor_id", user.id).eq("status", "submitted"),
       ])
 
-      const profile = profileRes.data as { first_name: string; last_name: string; role: string } | null
+      const profile = profileRes.data as { first_name: string; last_name: string; role: string; admin_level?: string | null } | null
       if (profile) {
         setUserName(`${profile.first_name} ${profile.last_name}`)
         setUserRole(profile.role)
+        setAdminLevel(profile.admin_level ?? null)
       }
       setUnreadCount((unreadRes as { count: number | null }).count ?? 0)
       setPendingApprovals((approvalsRes as { count: number | null }).count ?? 0)
@@ -86,7 +90,10 @@ export function Sidebar() {
       ? { ...item, badge: String(pendingApprovals) }
       : item
   )
-  const bottomNav = bottomNavBase.map((item) =>
+  const bottomNav = [
+    ...(adminLevel ? [{ label: adminLevel === "director" ? "Director console" : "Admin console", icon: ShieldCheck, href: "/admin" }] : []),
+    ...bottomNavBase,
+  ].map((item) =>
     item.href === "/notifications" && unreadCount > 0
       ? { ...item, badge: String(unreadCount) }
       : item
@@ -189,7 +196,7 @@ export function Sidebar() {
               {userName || "Loading…"}
             </p>
             <p className="text-zinc-500 text-[10px] truncate capitalize">
-              {userRole || (isSupervisor ? "Supervisor" : "Trainee")}
+              {adminLevel ? `${userRole} · ${adminLevel}` : userRole || (isSupervisor ? "Supervisor" : "Trainee")}
             </p>
           </div>
           <SignOutButton className="text-zinc-600 hover:text-zinc-400 transition-colors">

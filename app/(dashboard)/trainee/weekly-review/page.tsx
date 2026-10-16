@@ -10,6 +10,8 @@ import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
 import { kindToFields, type ActivityKind } from "@/lib/activityKind"
+import { api } from "@/lib/api"
+import { RequestUnlock, type UnlockRequestRow } from "@/components/unlock/UnlockControls"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
@@ -99,6 +101,7 @@ export default function WeeklyReviewPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
   const [submitSuccess, setSubmitSuccess] = useState(false)
+  const [unlockRequest, setUnlockRequest] = useState<UnlockRequestRow | null>(null)
 
   // Calendar import state
   const [showImport, setShowImport] = useState(false)
@@ -149,6 +152,12 @@ export default function WeeklyReviewPage() {
     setActivities(acts ?? [])
     setReview(rev ?? null)
     setSupervisorId(rel?.supervisor_id ?? null)
+    try {
+      const { requests } = await api<{ requests: UnlockRequestRow[] }>(`/api/unlock-requests?traineeId=${user.id}`)
+      setUnlockRequest(requests.find(r => r.scope === "week" && r.period_start === weekStart) ?? null)
+    } catch {
+      setUnlockRequest(null)
+    }
     setLoading(false)
   }, [weekStart])
 
@@ -333,7 +342,10 @@ export default function WeeklyReviewPage() {
     })
 
     const { error } = await supabase.from("activities").insert(toInsert)
-    if (!error) {
+    if (error) {
+      setSubmitError(error.message)
+      setShowTemplates(false)
+    } else {
       setTemplateGenSuccess(selected.length)
       setShowTemplates(false)
       await load()
@@ -431,6 +443,7 @@ export default function WeeklyReviewPage() {
   const isSubmitted = review?.status === "submitted"
   const isApproved = review?.status === "approved"
   const isRejected = review?.status === "rejected"
+  const isUnlocked = review?.status === "draft" && !!review?.unlocked_at
   const isCurrentWeek = weekStart === todayWeekStart
   const canImport = !isSubmitted && !isApproved
 
@@ -501,7 +514,20 @@ export default function WeeklyReviewPage() {
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <div>
                 <p className="text-sm font-semibold text-emerald-800">Week approved</p>
-                <p className="text-xs text-emerald-600 mt-0.5">Your supervisor approved this week's activities.</p>
+                <p className="text-xs text-emerald-600 mt-0.5">Your supervisor approved this week's activities. The week is locked — request an unlock if something needs to change.</p>
+                <RequestUnlock scope="week" period={weekStart} pending={unlockRequest} onChange={load} className="mt-2.5 w-fit" />
+              </div>
+            </div>
+          )}
+          {isUnlocked && (
+            <div className="flex items-start gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 mb-5">
+              <Pencil className="w-4 h-4 text-violet-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-violet-800">Week unlocked for edits</p>
+                <p className="text-xs text-violet-600 mt-0.5 leading-relaxed">
+                  Your supervisor unlocked this week{review?.unlocked_at ? ` on ${new Date(review.unlocked_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. Make your changes, then resubmit it.
+                  {review?.unlock_note ? ` Note: "${review.unlock_note}"` : ""}
+                </p>
               </div>
             </div>
           )}

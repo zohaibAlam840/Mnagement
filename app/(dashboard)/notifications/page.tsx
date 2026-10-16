@@ -30,8 +30,21 @@ function timeAgo(isoStr: string) {
   return new Date(isoStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-function getHref(notif: Notification): string | undefined {
+function getHref(notif: Notification, role: string): string | undefined {
+  const isSupervisor = role === "supervisor"
   switch (notif.type) {
+    case "review_submitted": return notif.related_id ? `/supervisor/approvals/${notif.related_id}` : "/supervisor/approvals"
+    case "review_approved":
+    case "review_rejected":
+    case "unlocked":
+    case "unlock_denied": return "/trainee/weekly-review"
+    case "unlock_request": return "/supervisor/approvals"
+    case "mvf_ready":
+    case "mvf_sign_needed":
+    case "mvf_signed":
+    case "fvf_ready":
+    case "fvf_signed": return isSupervisor ? "/supervisor/sign-off" : "/trainee/reports"
+    case "admin_assigned": return isSupervisor ? "/supervisor/supervisees" : "/trainee/supervisor"
     case "weekly_review_submitted": return notif.related_id ? `/supervisor/approvals/${notif.related_id}` : "/supervisor/approvals"
     case "weekly_review_approved": return "/trainee/reports"
     case "weekly_review_rejected": return "/trainee/weekly-review"
@@ -74,12 +87,15 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<"all" | "unread">("all")
+  const [role, setRole] = useState("")
 
   useEffect(() => {
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      supabase.from("profiles").select("role").eq("id", user.id).single()
+        .then(({ data: p }) => setRole((p as { role?: string } | null)?.role ?? ""))
       const { data } = await supabase
         .from("notifications")
         .select("*")
@@ -184,7 +200,7 @@ export default function NotificationsPage() {
       ) : (
         <div className="space-y-2">
           {displayed.map((notif) => {
-            const href = getHref(notif)
+            const href = getHref(notif, role)
             const icon = iconMap[notif.type] ?? iconMap.default
             const bg = bgMap[notif.type] ?? bgMap.default
 

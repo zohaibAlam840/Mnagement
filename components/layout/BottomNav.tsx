@@ -26,6 +26,7 @@ const traineeItems = [
 const supervisorItems = [
   { label: "Home", icon: LayoutDashboard, href: "/supervisor" },
   { label: "Trainees", icon: Users, href: "/supervisor/supervisees" },
+  { label: "Activities", icon: Activity, href: "/supervisor/activities" },
   { label: "Approvals", icon: CheckSquare, href: "/supervisor/approvals", badge: true },
   { label: "Reports", icon: FileText, href: "/supervisor/sign-off" },
   { label: "Profile", icon: UserCircle, href: "/settings" },

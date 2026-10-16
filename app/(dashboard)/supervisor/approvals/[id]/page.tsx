@@ -4,11 +4,13 @@ import { useState, useEffect, use } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  ChevronLeft, Check, X, MessageSquare, CheckCircle2, Clock, AlertCircle
+  ChevronLeft, Check, X, MessageSquare, CheckCircle2, Clock, AlertCircle, Lock, Pencil
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { UnlockAction } from "@/components/unlock/UnlockControls"
+import { UnlockRequestsList } from "@/components/unlock/UnlockRequestsList"
 
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
@@ -54,6 +56,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
   const [acting, setActing] = useState(false)
   const [actError, setActError] = useState("")
   const [decision, setDecision] = useState<"approved" | "rejected" | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -70,9 +73,6 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
 
       if (!rev) { setNotFound(true); setLoading(false); return }
       setReview(rev)
-      if (rev.status === "approved" || rev.status === "rejected") {
-        setDecision(rev.status as "approved" | "rejected")
-      }
 
       const [{ data: acts }, { data: profile }] = await Promise.all([
         supabase.from("activities").select("*")
@@ -90,7 +90,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
       setLoading(false)
     }
     load()
-  }, [id])
+  }, [id, reloadKey])
 
   const handleDecision = async (action: "approved" | "rejected") => {
     if (!review || !trainee) return
@@ -111,13 +111,14 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
 
     if (reviewError) { setActError(reviewError.message); setActing(false); return }
 
-    // Update activity statuses
-    const activityIds = activities.map(a => a.id)
+    // Update activity statuses (activities in an already-signed month stay approved)
+    const activityIds = activities.filter(a => !(action === "rejected" && a.status === "approved")).map(a => a.id)
     if (activityIds.length > 0) {
-      await supabase
+      const { error: actsError } = await supabase
         .from("activities")
         .update({ status: action })
         .in("id", activityIds)
+      if (actsError) { setActError(actsError.message); setActing(false); return }
     }
 
     // Notify trainee
@@ -161,6 +162,14 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
   const traineeInitials = trainee
     ? `${trainee.first_name[0]}${trainee.last_name[0]}`.toUpperCase()
     : "??"
+  const isPending = review.status === "submitted"
+  const statusBadge = review.status === "approved"
+    ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-100", icon: Lock, label: "Approved · locked" }
+    : review.status === "rejected"
+      ? { cls: "bg-red-50 text-red-700 border-red-100", icon: X, label: "Returned" }
+      : review.status === "draft"
+        ? { cls: "bg-violet-50 text-violet-700 border-violet-100", icon: Pencil, label: review.unlocked_at ? "Unlocked for edits" : "Not submitted" }
+        : { cls: "bg-amber-50 text-amber-700 border-amber-100", icon: Clock, label: "Pending" }
 
   if (decision) {
     return (
@@ -183,12 +192,20 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
             : `${traineeName} has been notified to review and resubmit.`
           }
         </p>
-        <Link
-          href="/supervisor/approvals"
-          className="bg-violet-600 text-white font-semibold px-6 py-2.5 rounded-xl text-sm hover:bg-violet-700 transition-colors"
-        >
-          Back to approvals
-        </Link>
+        <div className="flex gap-3">
+          <button
+            onClick={() => { setDecision(null); setReloadKey(k => k + 1) }}
+            className="border border-zinc-200 bg-white text-zinc-700 font-semibold px-5 py-2.5 rounded-xl text-sm hover:bg-zinc-50 transition-colors"
+          >
+            View week
+          </button>
+          <Link
+            href="/supervisor/approvals"
+            className="bg-violet-600 text-white font-semibold px-6 py-2.5 rounded-xl text-sm hover:bg-violet-700 transition-colors"
+          >
+            Back to approvals
+          </Link>
+        </div>
       </div>
     )
   }
@@ -212,11 +229,24 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
               {review.submitted_at && ` · Submitted ${timeAgo(review.submitted_at)}`}
             </p>
           </div>
-          <span className="text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100 px-2.5 py-1.5 rounded-lg">
-            <Clock className="w-3 h-3 inline mr-1" />Pending
+          <span className={cn("text-xs font-semibold border px-2.5 py-1.5 rounded-lg", statusBadge.cls)}>
+            <statusBadge.icon className="w-3 h-3 inline mr-1" />{statusBadge.label}
           </span>
         </div>
+        {review.status === "approved" && trainee && (
+          <div className="mt-4 pt-4 border-t border-zinc-100 flex flex-wrap items-center gap-3 justify-between">
+            <p className="text-xs text-zinc-500">
+              Approved{review.reviewed_at ? ` ${timeAgo(review.reviewed_at)}` : ""}. The candidate can&apos;t change this week unless you unlock it.
+            </p>
+            <UnlockAction traineeId={trainee.id} scope="week" period={review.week_start_date} onDone={() => setReloadKey(k => k + 1)} />
+          </div>
+        )}
+        {review.supervisor_notes && !isPending && (
+          <p className="mt-3 text-xs text-zinc-500 italic">Your note: &ldquo;{review.supervisor_notes}&rdquo;</p>
+        )}
       </div>
+
+      {trainee && <UnlockRequestsList traineeId={trainee.id} onChange={() => setReloadKey(k => k + 1)} />}
 
       {/* Hours summary */}
       <div className="grid grid-cols-4 gap-3 mb-5">
@@ -280,6 +310,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
+      {isPending && <>
       {/* Comment */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
         <label className="flex items-center gap-2 text-sm font-semibold text-zinc-900 mb-2">
@@ -321,6 +352,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
           {acting ? "…" : "Approve Week"}
         </button>
       </div>
+      </>}
     </div>
   )
 }

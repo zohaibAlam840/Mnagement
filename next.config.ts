@@ -3,6 +3,11 @@ import withPWA from "@ducanh2912/next-pwa"
 
 const nextConfig: NextConfig = {
   turbopack: {},
+  // BACB form templates are read from disk by the MVF API routes
+  outputFileTracingIncludes: {
+    "/api/mvf/**": ["./public/forms/**"],
+    "/api/fvf/**": ["./public/forms/**"],
+  },
   typescript: {
     ignoreBuildErrors: true,
   },
