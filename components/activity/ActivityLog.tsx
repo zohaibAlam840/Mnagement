@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock, AlertTriangle, CircleDashed, History } from "lucide-react"
 import { api } from "@/lib/api"
@@ -57,6 +57,7 @@ export function ActivityLog({
   const [reviews, setReviews] = useState<ReviewLite[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const latestRequest = useRef(0)
 
   const { from, to, title } = useMemo(() => {
     if (mode === "week") {
@@ -69,15 +70,19 @@ export function ActivityLog({
   }, [mode, anchor])
 
   const load = useCallback(async () => {
+    // Paging quickly fires overlapping requests; only the latest may update the view
+    const requestId = ++latestRequest.current
     setLoading(true)
     setError("")
     try {
       const data = await api<{ activities: ActivityRow[]; reviews: ReviewLite[] }>(
         `/api/activities?traineeId=${traineeId}&from=${from}&to=${to}`,
       )
+      if (requestId !== latestRequest.current) return
       setActivities(data.activities)
       setReviews(data.reviews)
     } catch (e) {
+      if (requestId !== latestRequest.current) return
       setError((e as Error).message)
     }
     setLoading(false)
