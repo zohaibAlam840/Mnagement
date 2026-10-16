@@ -28,6 +28,7 @@ export default function SignOffPage() {
   const [forms, setForms] = useState<MonthlySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [traineeId, setTraineeId] = useState("")
+  const [formsVersion, setFormsVersion] = useState(0)
   // Default to last month: forms are signed in the month after the supervisory period
   const [month, setMonth] = useState(monthOptions[1]?.value ?? monthOptions[0].value)
 
@@ -67,7 +68,8 @@ export default function SignOffPage() {
     load()
   }, [loadForms])
 
-  const refreshForms = () => loadForms(supervisees.map(s => s.id))
+  // A signed/unlocked monthly form changes what the final form can include
+  const refreshForms = () => { loadForms(supervisees.map(s => s.id)); setFormsVersion(v => v + 1) }
 
   if (loading) {
     return (
@@ -162,7 +164,7 @@ export default function SignOffPage() {
               <>
                 <MvfPanel key={`${traineeId}-${month}`} traineeId={traineeId} month={month} onChange={refreshForms} />
                 <ActivityLog key={`log-${traineeId}-${month}`} traineeId={traineeId} canUnlock initialMode="month" initialMonth={month} />
-                <FvfPanel key={`fvf-${traineeId}`} traineeId={traineeId} />
+                <FvfPanel key={`fvf-${traineeId}-${formsVersion}`} traineeId={traineeId} />
               </>
             )}
           </div>

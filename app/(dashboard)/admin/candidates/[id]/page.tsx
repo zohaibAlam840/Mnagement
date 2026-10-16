@@ -23,6 +23,7 @@ export default function AdminCandidatePage({ params }: { params: Promise<{ id: s
   const [busy, setBusy] = useState<string | null>(null)
   const [addSupervisor, setAddSupervisor] = useState("")
   const [reloadKey, setReloadKey] = useState(0)
+  const [fvfVersion, setFvfVersion] = useState(0)
 
   const months = useMemo(() => {
     const now = new Date()
@@ -139,8 +140,8 @@ export default function AdminCandidatePage({ params }: { params: Promise<{ id: s
           {months.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
         </select>
       </div>
-      <MvfPanel key={`${month}-${reloadKey}`} traineeId={id} month={month} />
-      <FvfPanel key={`fvf-${reloadKey}`} traineeId={id} />
+      <MvfPanel key={`${month}-${reloadKey}`} traineeId={id} month={month} onChange={() => setFvfVersion(v => v + 1)} />
+      <FvfPanel key={`fvf-${reloadKey}-${fvfVersion}`} traineeId={id} />
     </div>
   )
 }
