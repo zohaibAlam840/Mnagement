@@ -32,13 +32,24 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(`${appUrl}/login`)
 
-  await (supabase.from("profiles") as any)
-    .update({
-      google_refresh_token: tokens.refresh_token ?? null,
-      google_access_token: tokens.access_token,
-      google_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-    })
+  // Google only sends a refresh token with a fresh consent; keep the existing one otherwise
+  const update: Record<string, string> = {
+    google_access_token: tokens.access_token,
+    google_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+  }
+  if (tokens.refresh_token) update.google_refresh_token = tokens.refresh_token
+
+  const { data: saved, error: saveError } = await (supabase.from("profiles") as any)
+    .update(update)
     .eq("id", user.id)
+    .select("google_refresh_token")
+    .maybeSingle()
+
+  // Don't report "connected" unless the connection was really stored
+  if (saveError || !saved?.google_refresh_token) {
+    console.error("calendar connect: could not save tokens", saveError?.message ?? "no refresh token")
+    return NextResponse.redirect(`${appUrl}/settings/calendar?error=save_failed`)
+  }
 
   return NextResponse.redirect(`${appUrl}/settings/calendar?connected=true`)
 }

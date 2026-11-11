@@ -200,6 +200,8 @@ export default function WeeklyReviewPage() {
       if (!res.ok) {
         if (data.error === "not_connected") {
           setImportError("Google Calendar is not connected. Go to Settings → Calendar Sync to connect.")
+        } else if (data.error === "token_refresh_failed" || res.status === 401) {
+          setImportError("Your Google Calendar connection has expired. Go to Settings → Calendar Sync, disconnect and connect again.")
         } else {
           setImportError(data.error || "Failed to fetch calendar events.")
         }
@@ -696,7 +698,7 @@ export default function WeeklyReviewPage() {
                     <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-red-700">{importError}</p>
                   </div>
-                  {importError.includes("not connected") && (
+                  {importError.includes("Calendar Sync") && (
                     <Link href="/settings/calendar" className="mt-3 inline-flex text-sm font-semibold text-violet-600 hover:text-violet-700">
                       Go to Calendar Settings →
                     </Link>

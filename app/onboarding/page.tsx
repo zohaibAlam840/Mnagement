@@ -388,9 +388,9 @@ function StepThree({ router, role }: { router: ReturnType<typeof useRouter>; rol
 
       <div className="bg-zinc-50 rounded-xl p-4 border border-zinc-100 mb-5 space-y-3">
         {[
-          "Pull session events automatically",
-          "Match events to your activity templates",
-          "Sync every 15 minutes",
+          "Import a week of calendar events in one click",
+          "Tag each event's activity type (and Restricted or Unrestricted)",
+          "Read-only access: nothing is changed in your calendar",
           "You always confirm before submitting",
         ].map((item) => (
           <div key={item} className="flex items-center gap-2.5 text-sm text-zinc-700">
