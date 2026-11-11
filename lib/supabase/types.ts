@@ -2,7 +2,9 @@ export type UserRole = "trainee" | "supervisor"
 export type CertificationTarget = "BCBA" | "BCaBA" | "RBT"
 export type FieldworkType = "supervised" | "concentrated"
 export type RequirementsYear = "2022" | "2027" | "both"
-export type ActivityCategory = "Restricted" | "Unrestricted" | "Supervision"
+// Restricted/Unrestricted; null = legacy supervision row awaiting review (see lib/activityKind.ts)
+export type ActivityCategory = "Restricted" | "Unrestricted"
+export type ActivityType = "FIELDWORK_TASK" | "INDIVIDUAL_SUPERVISION" | "GROUP_SUPERVISION" | "OBSERVATION"
 export type ActivityStatus = "draft" | "submitted" | "approved" | "rejected"
 export type ReviewStatus = "draft" | "submitted" | "approved" | "rejected"
 export type SessionType = "individual" | "group"
@@ -79,7 +81,8 @@ export interface Database {
           id: string
           trainee_id: string
           title: string
-          category: ActivityCategory
+          category: ActivityCategory | null
+          activity_type: ActivityType | null
           subcategory: string | null
           days: string[]
           start_time: string
@@ -104,7 +107,8 @@ export interface Database {
           start_time: string
           end_time: string
           duration_minutes: number
-          category: ActivityCategory
+          category: ActivityCategory | null
+          activity_type: ActivityType | null
           subcategory: string | null
           client_name: string | null
           observation_with_client: boolean

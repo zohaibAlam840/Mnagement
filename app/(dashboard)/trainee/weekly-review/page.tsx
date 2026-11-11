@@ -9,14 +9,17 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
-import { kindToFields, type ActivityKind } from "@/lib/activityKind"
+import {
+  categoryOf, kindNeedsCategory, kindToFields, needsCategory, rowToKind, sumHours,
+  type ActivityKind, type FieldworkCategory,
+} from "@/lib/activityKind"
+import { KindBadge, KindPicker } from "@/components/activity/KindPicker"
 import { api } from "@/lib/api"
 import { RequestUnlock, type UnlockRequestRow } from "@/components/unlock/UnlockControls"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type WeeklyReviewRow = Database["public"]["Tables"]["weekly_reviews"]["Row"]
 type TemplateRow = Database["public"]["Tables"]["activity_templates"]["Row"]
-type ActivityCategory = "Restricted" | "Unrestricted" | "Supervision"
 
 type TemplateItem = {
   template: TemplateRow
@@ -37,6 +40,7 @@ type ImportKind = ActivityKind
 type ImportItem = {
   event: GCalEvent
   kind: ImportKind
+  category: FieldworkCategory | null // required toggle for supervision/observation
   selected: boolean
 }
 
@@ -110,6 +114,7 @@ export default function WeeklyReviewPage() {
   const [importError, setImportError] = useState("")
   const [importing, setImporting] = useState(false)
   const [importSuccess, setImportSuccess] = useState(0)
+  const [importTried, setImportTried] = useState(false)
 
   // Template generation state
   const [showTemplates, setShowTemplates] = useState(false)
@@ -211,6 +216,7 @@ export default function WeeklyReviewPage() {
       setImportItems(data.map((e: GCalEvent) => ({
         event: e,
         kind: "Restricted" as const,
+        category: null,
         selected: true,
       })))
     } catch {
@@ -222,6 +228,8 @@ export default function WeeklyReviewPage() {
   const handleConfirmImport = async () => {
     const selected = importItems.filter(i => i.selected)
     if (selected.length === 0) return
+    setImportTried(true)
+    if (selected.some(i => kindNeedsCategory(i.kind) && !i.category)) return
 
     setImporting(true)
     const supabase = createClient()
@@ -230,7 +238,7 @@ export default function WeeklyReviewPage() {
 
     const activitiesToInsert = selected.map(item => {
       const { date, startTime, endTime, durationMins } = parseGCalTime(item.event)
-      const fields = kindToFields(item.kind, durationMins)
+      const fields = kindToFields(item.kind, item.category, durationMins)
       return {
         trainee_id: user.id,
         title: item.event.summary || "Imported from Google Calendar",
@@ -298,7 +306,8 @@ export default function WeeklyReviewPage() {
           a => a.date === date && a.title === template.title
         )
         if (alreadyExists) continue
-        items.push({ template, date, selected: true })
+        // Templates missing Restricted/Unrestricted can't generate entries until fixed
+        items.push({ template, date, selected: !needsCategory(template) })
       }
     }
 
@@ -309,7 +318,7 @@ export default function WeeklyReviewPage() {
   }
 
   const handleGenerateFromTemplates = async () => {
-    const selected = templateItems.filter(i => i.selected)
+    const selected = templateItems.filter(i => i.selected && !needsCategory(i.template))
     if (selected.length === 0) return
 
     setGeneratingFromTemplates(true)
@@ -321,6 +330,7 @@ export default function WeeklyReviewPage() {
       const [sh, sm] = template.start_time.split(":").map(Number)
       const [eh, em] = template.end_time.split(":").map(Number)
       const durationMins = Math.max(0, (eh * 60 + em) - (sh * 60 + sm))
+      const fields = kindToFields(rowToKind(template), categoryOf(template), durationMins)
       return {
         trainee_id: user.id,
         template_id: template.id,
@@ -329,13 +339,10 @@ export default function WeeklyReviewPage() {
         start_time: template.start_time,
         end_time: template.end_time,
         duration_minutes: durationMins,
-        category: template.category as ActivityCategory,
+        ...fields,
         subcategory: template.subcategory,
         client_name: template.client_name,
         notes: template.notes,
-        observation_with_client: false,
-        observation_duration_minutes: 0,
-        supervision_present: template.category === "Supervision",
         status: "draft" as const,
         week_start_date: weekStart,
       }
@@ -359,6 +366,11 @@ export default function WeeklyReviewPage() {
       return
     }
     if (activities.length === 0) return
+    const missing = activities.filter(needsCategory).length
+    if (missing > 0) {
+      setSubmitError(`${missing} entr${missing === 1 ? "y needs" : "ies need"} Restricted or Unrestricted selected before you can submit. Open each amber entry to choose.`)
+      return
+    }
 
     setSubmitting(true)
     setSubmitError("")
@@ -368,10 +380,11 @@ export default function WeeklyReviewPage() {
     if (!user) return
 
     const weekEnd = getWeekEnd(weekStart)
-    const totalH = activities.reduce((s, a) => s + a.duration_minutes, 0) / 60
-    const restrictedH = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-    const unrestrictedH = activities.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-    const supervisionH = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+    const h = sumHours(activities)
+    const totalH = h.total
+    const restrictedH = h.restricted
+    const unrestrictedH = h.unrestricted
+    const supervisionH = h.supervision
 
     const reviewPayload = {
       trainee_id: user.id,
@@ -435,10 +448,12 @@ export default function WeeklyReviewPage() {
     await load()
   }
 
-  const totalHours = activities.reduce((s, a) => s + a.duration_minutes, 0) / 60
-  const restrictedHours = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-  const unrestrictedHours = activities.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-  const supervisionHours = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+  const weekHours = sumHours(activities)
+  const totalHours = weekHours.total
+  const restrictedHours = weekHours.restricted
+  const unrestrictedHours = weekHours.unrestricted
+  const supervisionHours = weekHours.supervision
+  const needsCategoryCount = activities.filter(needsCategory).length
 
   const isSubmitted = review?.status === "submitted"
   const isApproved = review?.status === "approved"
@@ -611,6 +626,8 @@ export default function WeeklyReviewPage() {
                     {templateItems.map((item, idx) => (
                       <button
                         key={`${item.template.id}-${item.date}`}
+                        disabled={needsCategory(item.template)}
+                        title={needsCategory(item.template) ? "Set Restricted or Unrestricted on this template first" : undefined}
                         onClick={() => setTemplateItems(prev => prev.map((x, i) => i === idx ? { ...x, selected: !x.selected } : x))}
                         className={cn(
                           "w-full flex items-center gap-3 px-5 py-3 text-left transition-colors",
@@ -629,14 +646,7 @@ export default function WeeklyReviewPage() {
                             {formatDateShort(item.date)} · {formatTime(item.template.start_time)} – {formatTime(item.template.end_time)}
                           </p>
                         </div>
-                        <span className={cn(
-                          "text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0",
-                          item.template.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                          item.template.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                          "bg-blue-50 text-blue-700"
-                        )}>
-                          {item.template.category}
-                        </span>
+                        <KindBadge a={item.template} className="flex-shrink-0" />
                       </button>
                     ))}
                   </div>
@@ -736,24 +746,26 @@ export default function WeeklyReviewPage() {
                             </p>
                           </div>
 
-                          <select
-                            value={item.kind}
-                            onChange={e => setImportItems(items => items.map((it, i) => i === idx ? { ...it, kind: e.target.value as ImportKind } : it))}
-                            disabled={!item.selected}
-                            className="text-xs font-semibold border border-zinc-200 rounded-lg px-2 py-1.5 focus:outline-none bg-white disabled:opacity-40 text-zinc-700"
-                          >
-                            <option value="Restricted">Restricted</option>
-                            <option value="Unrestricted">Unrestricted</option>
-                            <option value="Individual Supervision">Individual Supervision</option>
-                            <option value="Group Supervision">Group Supervision</option>
-                            <option value="Observation">Observation</option>
-                          </select>
+                          <div className="w-48 flex-shrink-0">
+                            <KindPicker
+                              compact
+                              kind={item.kind}
+                              onKind={k => setImportItems(items => items.map((it, i) => i === idx ? { ...it, kind: k, category: null } : it))}
+                              category={item.category}
+                              onCategory={c => setImportItems(items => items.map((it, i) => i === idx ? { ...it, category: c } : it))}
+                              disabled={!item.selected}
+                              showError={importTried && item.selected}
+                            />
+                          </div>
                         </div>
                       )
                     })}
                   </div>
 
-                  <div className="px-5 py-4 border-t border-zinc-100 flex gap-3">
+                  <div className="px-5 py-4 border-t border-zinc-100 flex flex-wrap items-center gap-3">
+                    {importTried && importItems.some(i => i.selected && kindNeedsCategory(i.kind) && !i.category) && (
+                      <p className="w-full text-xs text-red-600">Choose Restricted or Unrestricted for every supervision/observation event.</p>
+                    )}
                     <button
                       onClick={handleConfirmImport}
                       disabled={importing || importItems.filter(i => i.selected).length === 0}
@@ -835,14 +847,7 @@ export default function WeeklyReviewPage() {
                               <span className="text-[11px] text-zinc-400">
                                 {formatTime(a.start_time)} – {formatTime(a.end_time)}
                               </span>
-                              <span className={cn(
-                                "text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
-                                a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                                a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                                "bg-blue-50 text-blue-700"
-                              )}>
-                                {a.category}
-                              </span>
+                              <KindBadge a={a} />
                             </div>
                           </div>
 
@@ -850,9 +855,10 @@ export default function WeeklyReviewPage() {
                             <span className="text-sm font-semibold text-zinc-600">
                               {(a.duration_minutes / 60).toFixed(1)}h
                             </span>
-                            {!isSubmitted && !isApproved && (
+                            {((!isSubmitted && !isApproved) || needsCategory(a)) && (
                               <Link
                                 href={`/trainee/activities/${a.id}`}
+                                title={needsCategory(a) ? "Choose Restricted or Unrestricted" : "Edit"}
                                 className="w-7 h-7 rounded-lg hover:bg-zinc-100 flex items-center justify-center text-zinc-400 transition-colors"
                               >
                                 <Pencil className="w-3 h-3" />
@@ -887,6 +893,18 @@ export default function WeeklyReviewPage() {
                     </div>
                   ))}
                 </div>
+                <p className="text-[11px] text-zinc-400 -mt-2 mb-4">
+                  Supervision hours are also included in Restricted or Unrestricted. Each entry counts once toward the total.
+                </p>
+                {needsCategoryCount > 0 && (
+                  <div className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2.5 mb-3">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+                    <span>
+                      {needsCategoryCount} entr{needsCategoryCount === 1 ? "y needs" : "ies need"} Restricted or Unrestricted
+                      ({weekHours.uncategorized.toFixed(1)}h not yet counted in either). Tap the pencil on each amber entry to choose.
+                    </span>
+                  </div>
+                )}
 
                 {submitError && (
                   <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5 mb-3">

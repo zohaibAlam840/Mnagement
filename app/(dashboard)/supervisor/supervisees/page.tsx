@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ChevronRight, AlertTriangle, CheckCircle2, Plus, Mail, X, UserPlus, Clock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { sumHours } from "@/lib/activityKind"
 import type { Database } from "@/lib/supabase/types"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
@@ -89,7 +90,7 @@ export default function SuperviseesPage() {
       const [p, tp, acts, reviews] = await Promise.all([
         supabase.from("profiles").select("*").in("id", traineeIds),
         supabase.from("trainee_profiles").select("*").in("id", traineeIds),
-        supabase.from("activities").select("trainee_id, category, duration_minutes, date").in("trainee_id", traineeIds),
+        supabase.from("activities").select("*").in("trainee_id", traineeIds),
         supabase.from("weekly_reviews").select("trainee_id").eq("supervisor_id", user.id).eq("status", "submitted"),
       ])
       profiles = p.data ?? []
@@ -107,8 +108,8 @@ export default function SuperviseesPage() {
       const traineeProfile = traineeProfileMap[rel.trainee_id] ?? null
       const myActs = activities.filter(a => a.trainee_id === rel.trainee_id)
       const totalHours = myActs.reduce((s, a) => s + a.duration_minutes, 0) / 60
-      const restrictedHours = myActs.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-      const supervisionHours = myActs.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+      const restrictedHours = sumHours(myActs).restricted
+      const supervisionHours = sumHours(myActs).supervision
       const today = new Date()
       const monthStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`
       const monthlyHours = myActs.filter(a => a.date >= monthStart).reduce((s, a) => s + a.duration_minutes, 0) / 60

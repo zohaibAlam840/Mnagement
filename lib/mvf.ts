@@ -6,11 +6,15 @@
 //   Total / Percent    = in-app monthly total and supervision %
 
 import { minutesToHM } from "./period"
+import { isSupervision } from "./activityKind"
 import type { MvfFormType } from "./supabase/types"
 
 export type MvfActivity = {
   duration_minutes: number
-  category: string
+  category: string | null
+  activity_type?: string | null
+  session_type?: string | null
+  subcategory?: string | null
   observation_with_client?: boolean | null
   observation_duration_minutes?: number | null
 }
@@ -101,7 +105,7 @@ export function computeMvfMinutes(acts: MvfActivity[]): MvfMinutes {
   let observation = 0
   for (const a of acts) {
     const mins = a.duration_minutes ?? 0
-    if (a.category === "Supervision") supervised += mins
+    if (isSupervision(a)) supervised += mins
     else independent += mins
     if (a.observation_with_client) observation += a.observation_duration_minutes ?? 0
   }

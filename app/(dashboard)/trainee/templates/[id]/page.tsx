@@ -10,10 +10,17 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { KindBadge, KindPicker } from "@/components/activity/KindPicker"
+import {
+  categoryOf, isSupervision, kindNeedsCategory, kindToType, needsCategory, resolveCategory, rowToKind,
+  toneOf, TONE_SOLID, TONE_TEXT, TONE_TILE,
+  type ActivityKind, type FieldworkCategory,
+} from "@/lib/activityKind"
 
 type TemplateRow = Database["public"]["Tables"]["activity_templates"]["Row"]
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type Category = "Restricted" | "Unrestricted" | "Supervision"
+const subcategoryGroup = (k: ActivityKind): Category => (k === "Restricted" || k === "Unrestricted" ? k : "Supervision")
 
 const SUBCATEGORIES: Record<Category, string[]> = {
   Restricted: ["Discrete Trial Training","Natural Environment Training","Functional Behavior Assessment","Behavior Intervention Plan","Skill Acquisition Program","Other Restricted"],
@@ -52,7 +59,9 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
 
   // Edit state
   const [title, setTitle] = useState("")
-  const [category, setCategory] = useState<Category>("Restricted")
+  const [kind, setKind] = useState<ActivityKind>("Restricted")
+  const [categoryToggle, setCategoryToggle] = useState<FieldworkCategory | null>(null)
+  const [triedSave, setTriedSave] = useState(false)
   const [subcategory, setSubcategory] = useState("")
   const [days, setDays] = useState<string[]>([])
   const [startTime, setStartTime] = useState("")
@@ -76,7 +85,10 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
       setRecentActivities(acts ?? [])
       // populate edit fields
       setTitle(tmpl.title)
-      setCategory(tmpl.category as Category)
+      setKind(rowToKind(tmpl))
+      setCategoryToggle(isSupervision(tmpl) ? categoryOf(tmpl) : null)
+      // Legacy supervision template without a category: open the editor straight away
+      if (needsCategory(tmpl)) setEditing(true)
       setSubcategory(tmpl.subcategory ?? "")
       setDays(tmpl.days)
       setStartTime(tmpl.start_time.slice(0, 5))
@@ -109,6 +121,9 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
     const startM = parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1])
     const endM = parseInt(endTime.split(":")[0]) * 60 + parseInt(endTime.split(":")[1])
     if (endM <= startM) { setError("End time must be after start time"); return }
+    setTriedSave(true)
+    const category = resolveCategory(kind, categoryToggle)
+    if (kindNeedsCategory(kind) && !category) { setError("Select Restricted or Unrestricted for this supervision/observation template"); return }
 
     setSaving(true)
     const supabase = createClient()
@@ -116,6 +131,7 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
       .from("activity_templates")
       .update({
         title: title.trim(),
+        activity_type: kindToType(kind),
         category,
         subcategory: subcategory || null,
         days,
@@ -136,7 +152,9 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
   const handleCancelEdit = () => {
     if (!template) return
     setTitle(template.title)
-    setCategory(template.category as Category)
+    setKind(rowToKind(template))
+    setCategoryToggle(isSupervision(template) ? categoryOf(template) : null)
+    setTriedSave(false)
     setSubcategory(template.subcategory ?? "")
     setDays(template.days)
     setStartTime(template.start_time.slice(0, 5))
@@ -182,7 +200,9 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
   const weeklyHours = duration * displayDays.length
   const monthlyHours = weeklyHours * 4.3
 
-  const displayCategory = (editing ? category : template.category) as Category
+  const tone = editing
+    ? toneOf({ activity_type: kindToType(kind), category: resolveCategory(kind, categoryToggle) ?? "Restricted" })
+    : toneOf(template)
 
   return (
     <div className="p-4 md:p-7 max-w-2xl mx-auto">
@@ -193,16 +213,8 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
       {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div className="flex items-center gap-3 flex-1 min-w-0 pr-4">
-          <div className={cn(
-            "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-            displayCategory === "Restricted" ? "bg-violet-100" :
-            displayCategory === "Supervision" ? "bg-emerald-100" : "bg-blue-100"
-          )}>
-            <Repeat2 className={cn(
-              "w-5 h-5",
-              displayCategory === "Restricted" ? "text-violet-600" :
-              displayCategory === "Supervision" ? "text-emerald-600" : "text-blue-600"
-            )} />
+          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0", TONE_TILE[tone])}>
+            <Repeat2 className={cn("w-5 h-5", TONE_TEXT[tone])} />
           </div>
           {editing ? (
             <input
@@ -252,25 +264,7 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
 
       {/* Status badges */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
-        {editing ? (
-          <select
-            value={category}
-            onChange={(e) => { setCategory(e.target.value as Category); setSubcategory(SUBCATEGORIES[e.target.value as Category][0]) }}
-            className="text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 focus:outline-none"
-          >
-            <option>Restricted</option>
-            <option>Unrestricted</option>
-            <option>Supervision</option>
-          </select>
-        ) : (
-          <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full",
-            template.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-            template.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-            "bg-blue-50 text-blue-700"
-          )}>
-            {template.category}
-          </span>
-        )}
+        {!editing && <KindBadge a={template} className="text-xs px-2.5 py-1" />}
         <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full",
           template.active ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-500"
         )}>
@@ -282,6 +276,35 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
           </span>
         )}
       </div>
+
+      {!editing && needsCategory(template) && (
+        <div className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          This template needs Restricted or Unrestricted before it can generate activities. Tap Edit to choose.
+        </div>
+      )}
+
+      {editing && (
+        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-4">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Activity Type</p>
+          <KindPicker
+            kind={kind}
+            onKind={(k) => {
+              setKind(k)
+              setCategoryToggle(null)
+              setTriedSave(false)
+              setSubcategory(
+                k === "Group Supervision" ? "Group Supervision" :
+                k === "Observation" ? "Observation — Direct" :
+                k === "Individual Supervision" ? "Individual Supervision" : SUBCATEGORIES[subcategoryGroup(k)][0]
+              )
+            }}
+            category={categoryToggle}
+            onCategory={c => { setCategoryToggle(c); setError("") }}
+            showError={triedSave}
+          />
+        </div>
+      )}
 
       {/* Schedule card */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-4">
@@ -298,9 +321,7 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
                 className={cn(
                   "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
                   displayDays.includes(d)
-                    ? displayCategory === "Restricted" ? "bg-violet-600 text-white border-violet-600" :
-                      displayCategory === "Supervision" ? "bg-emerald-600 text-white border-emerald-600" :
-                      "bg-blue-600 text-white border-blue-600"
+                    ? TONE_SOLID[tone]
                     : editing ? "border-zinc-200 text-zinc-400 hover:border-zinc-300" : "border-zinc-100 text-zinc-300"
                 )}
               >
@@ -354,7 +375,7 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
                 onChange={(e) => setSubcategory(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all bg-white"
               >
-                {SUBCATEGORIES[category].map((s) => <option key={s}>{s}</option>)}
+                {SUBCATEGORIES[subcategoryGroup(kind)].map((s) => <option key={s}>{s}</option>)}
               </select>
             </div>
             <div>
@@ -431,12 +452,7 @@ export default function TemplateDetail({ params }: { params: Promise<{ id: strin
           <div className="divide-y divide-zinc-50">
             {recentActivities.map((a) => (
               <Link key={a.id} href={`/trainee/activities/${a.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-zinc-50/50 transition-colors">
-                <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
-                  a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                  a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" :
-                  "bg-blue-100 text-blue-700"
-                )}>
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0", TONE_TILE[toneOf(a)])}>
                   {(a.duration_minutes / 60).toFixed(1)}h
                 </div>
                 <div className="flex-1 min-w-0">

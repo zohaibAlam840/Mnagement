@@ -7,9 +7,12 @@ import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
 import { ActivityLog } from "@/components/activity/ActivityLog"
+import { KindBadge } from "@/components/activity/KindPicker"
+import { NeedsCategoryPanel } from "@/components/activity/NeedsCategoryPanel"
+import { ACTIVITY_FILTERS, matchesFilter, needsCategory, sumMinutes, toneOf, TONE_TILE, type ActivityFilter } from "@/lib/activityKind"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
-type Category = "All" | "Restricted" | "Unrestricted" | "Supervision"
+type Category = ActivityFilter
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -47,6 +50,8 @@ export default function ActivitiesPage() {
   const [view, setView] = useState<"list" | "history">("list")
   const [userId, setUserId] = useState("")
 
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     async function load() {
       const supabase = createClient()
@@ -63,18 +68,20 @@ export default function ActivitiesPage() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [reloadKey])
 
   const filtered = activities.filter((a) => {
-    const matchesFilter = filter === "All" || a.category === filter
     const matchesSearch = a.title.toLowerCase().includes(search.toLowerCase())
-    return matchesFilter && matchesSearch
+    return matchesFilter(a, filter) && matchesSearch
   })
 
-  const totalMin = activities.reduce((s, a) => s + a.duration_minutes, 0)
-  const restrictedMin = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0)
-  const unrestrictedMin = activities.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0)
-  const supervisionMin = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0)
+  const totals = sumMinutes(activities)
+  const totalMin = totals.total
+  const restrictedMin = totals.restricted
+  const unrestrictedMin = totals.unrestricted
+  const supervisionMin = totals.supervision
+  const hasNeedsCategory = activities.some(needsCategory)
+  const filters = ACTIVITY_FILTERS.filter(f => f !== "Needs category" || hasNeedsCategory)
 
   return (
     <div className="p-4 md:p-7 max-w-5xl mx-auto">
@@ -106,7 +113,9 @@ export default function ActivitiesPage() {
         ))}
       </div>
 
-      {view === "history" && userId && <ActivityLog traineeId={userId} linkToActivity />}
+      {hasNeedsCategory && <NeedsCategoryPanel className="mb-5" onChange={() => setReloadKey(k => k + 1)} />}
+
+      {view === "history" && userId && <ActivityLog key={reloadKey} traineeId={userId} linkToActivity />}
 
       {view === "list" && <>
       {/* Search + filters */}
@@ -120,13 +129,13 @@ export default function ActivitiesPage() {
             className="w-full pl-9 pr-4 py-2.5 text-sm rounded-lg border border-[#E8E6F4] bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
           />
         </div>
-        <div className="flex gap-1.5 bg-white border border-[#E8E6F4] rounded-lg p-1">
-          {(["All", "Restricted", "Unrestricted", "Supervision"] as Category[]).map((c) => (
+        <div className="flex gap-1.5 bg-white border border-[#E8E6F4] rounded-lg p-1 overflow-x-auto">
+          {filters.map((c) => (
             <button
               key={c}
               onClick={() => setFilter(c)}
               className={cn(
-                "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
+                "px-3 py-1.5 text-xs font-semibold rounded-md transition-all whitespace-nowrap",
                 filter === c ? "bg-violet-600 text-white shadow-sm" : "text-zinc-500 hover:text-zinc-800"
               )}
             >
@@ -142,7 +151,8 @@ export default function ActivitiesPage() {
           { label: "Total", value: `${toHours(totalMin)}h`, color: "bg-zinc-100 text-zinc-600" },
           { label: "Restricted", value: `${toHours(restrictedMin)}h`, color: "bg-violet-50 text-violet-700" },
           { label: "Unrestricted", value: `${toHours(unrestrictedMin)}h`, color: "bg-blue-50 text-blue-700" },
-          { label: "Supervision", value: `${toHours(supervisionMin)}h`, color: "bg-emerald-50 text-emerald-700" },
+          { label: "Supervision (incl. in R/U)", value: `${toHours(supervisionMin)}h`, color: "bg-emerald-50 text-emerald-700" },
+          ...(totals.uncategorized > 0 ? [{ label: "Needs category", value: `${toHours(totals.uncategorized)}h`, color: "bg-amber-50 text-amber-800" }] : []),
         ].map((s) => (
           <span key={s.label} className={cn("flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold", s.color)}>
             {s.label}: {s.value}
@@ -152,7 +162,7 @@ export default function ActivitiesPage() {
 
       {/* Table / List */}
       <div className="bg-white rounded-xl border border-[#E8E6F4] overflow-hidden">
-        <div className="hidden md:grid grid-cols-[1fr_100px_80px_100px_80px_40px] gap-4 px-5 py-3 border-b border-zinc-50 bg-zinc-50/50">
+        <div className="hidden md:grid grid-cols-[1fr_100px_80px_180px_80px_40px] gap-4 px-5 py-3 border-b border-zinc-50 bg-zinc-50/50">
           {["Activity", "Date", "Duration", "Category", "Status", ""].map((h) => (
             <span key={h} className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">{h}</span>
           ))}
@@ -169,24 +179,14 @@ export default function ActivitiesPage() {
               <Link key={a.id} href={`/trainee/activities/${a.id}`} className="block hover:bg-zinc-50/30 transition-colors">
                 {/* Mobile */}
                 <div className="md:hidden flex items-start gap-3 px-4 py-4">
-                  <div className={cn(
-                    "w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5",
-                    a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                    a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" :
-                    "bg-blue-100 text-blue-700"
-                  )}>
+                  <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5", TONE_TILE[toneOf(a)])}>
                     {toHours(a.duration_minutes)}h
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-zinc-900">{a.title}</p>
                     <p className="text-xs text-zinc-400 mt-0.5">{formatDate(a.date)} · {formatTime(a.start_time)}–{formatTime(a.end_time)}</p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className={cn(
-                        "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                        a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                        a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                        "bg-blue-50 text-blue-700"
-                      )}>{a.category}</span>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <KindBadge a={a} />
                       <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", statusStyle(a.status))}>
                         {statusLabel(a.status)}
                       </span>
@@ -199,7 +199,7 @@ export default function ActivitiesPage() {
                 </div>
 
                 {/* Desktop */}
-                <div className="hidden md:grid grid-cols-[1fr_100px_80px_100px_80px_40px] gap-4 px-5 py-3.5 items-center">
+                <div className="hidden md:grid grid-cols-[1fr_100px_80px_180px_80px_40px] gap-4 px-5 py-3.5 items-center">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-zinc-900 truncate">{a.title}</p>
                     {a.client_name && <p className="text-xs text-zinc-400">{a.client_name}</p>}
@@ -212,12 +212,7 @@ export default function ActivitiesPage() {
                     <Clock className="w-3 h-3 text-zinc-400" />
                     <span className="text-sm text-zinc-600">{toHours(a.duration_minutes)}h</span>
                   </div>
-                  <span className={cn(
-                    "text-[11px] font-semibold px-2 py-1 rounded-full w-fit",
-                    a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                    a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                    "bg-blue-50 text-blue-700"
-                  )}>{a.category}</span>
+                  <KindBadge a={a} className="w-fit whitespace-normal" />
                   <span className={cn("text-[11px] font-semibold px-2 py-1 rounded-full w-fit", statusStyle(a.status))}>
                     {statusLabel(a.status)}
                   </span>

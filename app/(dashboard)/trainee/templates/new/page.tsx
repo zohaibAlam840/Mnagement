@@ -6,9 +6,17 @@ import Link from "next/link"
 import { ChevronLeft, Clock, User, Tag, AlignLeft, CheckCircle2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { KindPicker } from "@/components/activity/KindPicker"
+import {
+  kindNeedsCategory, kindToType, resolveCategory, toneOf, TONE_SOLID,
+  type ActivityKind, type FieldworkCategory,
+} from "@/lib/activityKind"
 
-const CATEGORIES = ["Restricted", "Unrestricted", "Supervision"] as const
-type Category = typeof CATEGORIES[number]
+type Category = "Restricted" | "Unrestricted" | "Supervision"
+
+function subcategoryGroup(kind: ActivityKind): Category {
+  return kind === "Restricted" || kind === "Unrestricted" ? kind : "Supervision"
+}
 
 const SUBCATEGORIES: Record<Category, string[]> = {
   Restricted: [
@@ -44,7 +52,9 @@ export default function NewTemplatePage() {
   const router = useRouter()
 
   const [title, setTitle] = useState("")
-  const [category, setCategory] = useState<Category>("Restricted")
+  const [kind, setKind] = useState<ActivityKind>("Restricted")
+  const [categoryToggle, setCategoryToggle] = useState<FieldworkCategory | null>(null)
+  const [triedSave, setTriedSave] = useState(false)
   const [subcategory, setSubcategory] = useState(SUBCATEGORIES["Restricted"][0])
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"])
   const [startTime, setStartTime] = useState("09:00")
@@ -62,9 +72,20 @@ export default function NewTemplatePage() {
   const weeklyHours = durationHours * days.length
   const monthlyHours = weeklyHours * 4.3
 
-  const handleCategoryChange = (c: Category) => {
-    setCategory(c)
-    setSubcategory(SUBCATEGORIES[c][0])
+  const category = resolveCategory(kind, categoryToggle)
+  const tone = toneOf({ activity_type: kindToType(kind), category: category ?? "Restricted" })
+
+  const handleKindChange = (k: ActivityKind) => {
+    setKind(k)
+    setCategoryToggle(null)
+    setTriedSave(false)
+    const group = subcategoryGroup(k)
+    const subs = SUBCATEGORIES[group]
+    setSubcategory(
+      k === "Group Supervision" ? "Group Supervision" :
+      k === "Observation" ? "Observation — Direct" :
+      k === "Individual Supervision" ? "Individual Supervision" : subs[0]
+    )
   }
 
   const toggleDay = (d: string) => {
@@ -76,6 +97,8 @@ export default function NewTemplatePage() {
     if (!title.trim()) { setError("Template name is required"); return }
     if (durationMinutes <= 0) { setError("End time must be after start time"); return }
     if (days.length === 0) { setError("Select at least one day"); return }
+    setTriedSave(true)
+    if (kindNeedsCategory(kind) && !category) { setError("Select Restricted or Unrestricted for this supervision/observation template"); return }
 
     setSaving(true)
     const supabase = createClient()
@@ -85,6 +108,7 @@ export default function NewTemplatePage() {
     const { error: insertError } = await supabase.from("activity_templates").insert({
       trainee_id: user.id,
       title: title.trim(),
+      activity_type: kindToType(kind),
       category,
       subcategory,
       days,
@@ -173,9 +197,7 @@ export default function NewTemplatePage() {
                 className={cn(
                   "flex-1 py-2.5 text-xs font-bold rounded-lg border transition-all",
                   days.includes(d)
-                    ? category === "Restricted" ? "bg-violet-600 text-white border-violet-600" :
-                      category === "Supervision" ? "bg-emerald-600 text-white border-emerald-600" :
-                      "bg-blue-600 text-white border-blue-600"
+                    ? TONE_SOLID[tone]
                     : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
                 )}
               >
@@ -229,34 +251,23 @@ export default function NewTemplatePage() {
         {/* Category */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
           <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-            <Tag className="w-3.5 h-3.5" /> BACB Category
+            <Tag className="w-3.5 h-3.5" /> Activity Type
           </label>
-          <div className="flex gap-2 mb-4">
-            {CATEGORIES.map((c) => (
-              <button
-                key={c}
-                onClick={() => handleCategoryChange(c)}
-                className={cn(
-                  "flex-1 py-2 text-xs font-semibold rounded-lg border transition-all",
-                  category === c
-                    ? c === "Restricted" ? "bg-violet-600 text-white border-violet-600" :
-                      c === "Supervision" ? "bg-emerald-600 text-white border-emerald-600" :
-                      "bg-blue-600 text-white border-blue-600"
-                    : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
-                )}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-          <div>
+          <KindPicker
+            kind={kind}
+            onKind={handleKindChange}
+            category={categoryToggle}
+            onCategory={c => { setCategoryToggle(c); setError("") }}
+            showError={triedSave}
+          />
+          <div className="mt-4">
             <p className="text-xs text-zinc-500 mb-1.5">Subcategory</p>
             <select
               value={subcategory}
               onChange={(e) => setSubcategory(e.target.value)}
               className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all bg-white"
             >
-              {SUBCATEGORIES[category].map((s) => (
+              {SUBCATEGORIES[subcategoryGroup(kind)].map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>

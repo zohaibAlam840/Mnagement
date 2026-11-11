@@ -5,6 +5,8 @@ import Link from "next/link"
 import { ChevronLeft, CheckCircle2, AlertTriangle, Clock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { KindBadge } from "@/components/activity/KindPicker"
+import { sumHours, toneOf, TONE_TILE } from "@/lib/activityKind"
 import type { Database } from "@/lib/supabase/types"
 import {
   computeMetrics, inMonth, monthlyCapHours,
@@ -100,8 +102,8 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
   }
 
   const totalHours = activities.reduce((s, a) => s + a.duration_minutes, 0) / 60
-  const restrictedH = activities.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-  const supervisionH = activities.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+  const restrictedH = sumHours(activities).restricted
+  const supervisionH = sumHours(activities).supervision
   const restrictedPct = totalHours > 0 ? (restrictedH / totalHours) * 100 : 0
   const supervisionPct = totalHours > 0 ? (supervisionH / totalHours) * 100 : 0
 
@@ -241,12 +243,7 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
           <div className="divide-y divide-zinc-50">
             {recentActivities.map((a) => (
               <div key={a.id} className="flex items-center gap-4 px-5 py-3.5">
-                <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
-                  a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                  a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" :
-                  "bg-blue-100 text-blue-700"
-                )}>
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0", TONE_TILE[toneOf(a)])}>
                   {(a.duration_minutes / 60).toFixed(1)}h
                 </div>
                 <div className="flex-1 min-w-0">
@@ -256,14 +253,7 @@ export default function SuperviseeDetail({ params }: { params: Promise<{ id: str
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <span className={cn(
-                    "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                    a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                    a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                    "bg-blue-50 text-blue-700"
-                  )}>
-                    {a.category}
-                  </span>
+                  <KindBadge a={a} />
                   {a.status === "approved"
                     ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                     : a.status === "submitted"

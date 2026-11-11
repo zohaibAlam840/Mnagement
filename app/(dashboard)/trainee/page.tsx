@@ -14,6 +14,9 @@ import {
   type FieldworkType, type RequirementsYear,
 } from "@/lib/bacb"
 import MonthlyBreakdown from "@/components/dashboard/MonthlyBreakdown"
+import { KindBadge } from "@/components/activity/KindPicker"
+import { NeedsCategoryPanel } from "@/components/activity/NeedsCategoryPanel"
+import { needsCategory, toneOf, TONE_TILE } from "@/lib/activityKind"
 import MonthSelect, { currentMonthValue, monthLabelFor } from "@/components/dashboard/MonthSelect"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
@@ -38,6 +41,7 @@ export default function TraineeDashboard() {
   const [supervisorStatus, setSupervisorStatus] = useState<"none" | "pending" | "active">("none")
   const [tab, setTab] = useState<"msp" | "total">("msp")
   const [selectedMonth, setSelectedMonth] = useState(currentMonthValue())
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -60,7 +64,7 @@ export default function TraineeDashboard() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [reloadKey])
 
   const targetHours = traineeProfile?.target_hours ?? 1500
   const fieldworkType = (traineeProfile?.fieldwork_type ?? "concentrated") as FieldworkType
@@ -170,6 +174,10 @@ export default function TraineeDashboard() {
         </div>
       </div>
 
+      {activities.some(needsCategory) && (
+        <NeedsCategoryPanel className="mb-5" onChange={() => setReloadKey(k => k + 1)} />
+      )}
+
       {/* Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div className="flex gap-1 p-1 bg-zinc-100 rounded-xl w-full sm:w-auto sm:inline-flex">
@@ -253,9 +261,7 @@ export default function TraineeDashboard() {
           <div className="divide-y divide-zinc-50">
             {recentActivities.map((a) => (
               <Link key={a.id} href={`/trainee/activities/${a.id}`} className="flex items-center gap-4 px-5 py-3.5 hover:bg-zinc-50/50 transition-colors">
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold",
-                  a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                  a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700")}>
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold", TONE_TILE[toneOf(a)])}>
                   {(a.duration_minutes / 60).toFixed(1)}h
                 </div>
                 <div className="flex-1 min-w-0">
@@ -263,9 +269,7 @@ export default function TraineeDashboard() {
                   <p className="text-[11px] text-zinc-400">{formatDate(a.date)} · {formatTime(a.start_time)} – {formatTime(a.end_time)}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                    a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                    a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700")}>{a.category}</span>
+                  <KindBadge a={a} className="hidden sm:inline" />
                   {a.status === "approved" ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Circle className="w-3.5 h-3.5 text-zinc-300" />}
                 </div>
               </Link>
@@ -294,7 +298,7 @@ function TotalView({ t, targetHours, progressPercent, weightedH, fieldworkType, 
         {[
           { label: "Total Hours", value: `${t.totalH}h`, sub: `of ${targetHours} required`, color: "text-violet-600", center: "text-zinc-900" },
           { label: "Restricted", value: `${t.restrictedH}h`, sub: `${t.restrictedPct}% · max ${RESTRICTED_MAX_PCT}% overall`, color: "text-blue-600", center: restrictedOver ? "text-red-600" : "text-zinc-900" },
-          { label: "Unrestricted", value: `${t.unrestrictedH}h`, sub: "program dev etc.", color: "text-emerald-600", center: "text-zinc-900" },
+          { label: "Unrestricted", value: `${t.unrestrictedH}h`, sub: t.uncategorizedH > 0 ? `${t.uncategorizedH}h still need a category` : "incl. unrestricted supervision", color: "text-emerald-600", center: "text-zinc-900" },
           { label: "Supervision", value: `${t.supervisionH}h`, sub: `${t.supervisionPct}% · grp ${t.groupSupPct}%`, color: "text-amber-600", center: "text-zinc-900" },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-4">

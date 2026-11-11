@@ -160,7 +160,7 @@ function CalendarSyncInner() {
           {[
             { step: "1", title: "Connect your Google Calendar", desc: "Authorize read-only access to your calendar events." },
             { step: "2", title: "Go to Weekly Review", desc: "Click \"Import from Google Calendar\" to pull this week's events." },
-            { step: "3", title: "Tag and confirm", desc: "Assign each event a BACB category (Restricted / Unrestricted / Supervision) and import as draft activities." },
+            { step: "3", title: "Tag and confirm", desc: "Pick each event's activity type, plus Restricted or Unrestricted for supervision and observation, and import as draft activities." },
             { step: "4", title: "Submit to supervisor", desc: "Review the imported activities and submit your week when ready." },
           ].map((item) => (
             <div key={item.step} className="flex gap-3">

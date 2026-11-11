@@ -8,6 +8,8 @@ import {
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { KindBadge } from "@/components/activity/KindPicker"
+import { sumHours, toneOf, TONE_TILE } from "@/lib/activityKind"
 import type { Database } from "@/lib/supabase/types"
 import { UnlockAction } from "@/components/unlock/UnlockControls"
 import { UnlockRequestsList } from "@/components/unlock/UnlockRequestsList"
@@ -163,6 +165,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
     ? `${trainee.first_name[0]}${trainee.last_name[0]}`.toUpperCase()
     : "??"
   const isPending = review.status === "submitted"
+  const weekH = sumHours(activities)
   const statusBadge = review.status === "approved"
     ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-100", icon: Lock, label: "Approved · locked" }
     : review.status === "rejected"
@@ -248,13 +251,13 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
 
       {trainee && <UnlockRequestsList traineeId={trainee.id} onChange={() => setReloadKey(k => k + 1)} />}
 
-      {/* Hours summary */}
+      {/* Hours summary — live from this week's entries (supervision also counts in Restricted/Unrestricted) */}
       <div className="grid grid-cols-4 gap-3 mb-5">
         {[
-          { label: "Total", value: review.total_hours.toFixed(1) + "h", color: "text-zinc-900" },
-          { label: "Restricted", value: review.restricted_hours.toFixed(1) + "h", color: "text-violet-600" },
-          { label: "Unrestricted", value: review.unrestricted_hours.toFixed(1) + "h", color: "text-blue-600" },
-          { label: "Supervision", value: review.supervision_hours.toFixed(1) + "h", color: "text-emerald-600" },
+          { label: "Total", value: weekH.total.toFixed(1) + "h", color: "text-zinc-900" },
+          { label: "Restricted", value: weekH.restricted.toFixed(1) + "h", color: "text-violet-600" },
+          { label: "Unrestricted", value: weekH.unrestricted.toFixed(1) + "h", color: "text-blue-600" },
+          { label: "Supervision", value: weekH.supervision.toFixed(1) + "h", color: "text-emerald-600" },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-3 text-center">
             <p className={cn("text-xl font-bold", s.color)}>{s.value}</p>
@@ -274,12 +277,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
           <div className="divide-y divide-zinc-50">
             {activities.map((a) => (
               <div key={a.id} className="flex items-center gap-4 px-5 py-3.5">
-                <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
-                  a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                  a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" :
-                  "bg-blue-100 text-blue-700"
-                )}>
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0", TONE_TILE[toneOf(a)])}>
                   {(a.duration_minutes / 60).toFixed(1)}h
                 </div>
                 <div className="flex-1 min-w-0">
@@ -292,14 +290,7 @@ export default function ApprovalDetail({ params }: { params: Promise<{ id: strin
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <span className={cn(
-                    "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                    a.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                    a.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                    "bg-blue-50 text-blue-700"
-                  )}>
-                    {a.category}
-                  </span>
+                  <KindBadge a={a} />
                   {a.notes && (
                     <span className="text-[10px] text-zinc-400 italic max-w-[140px] truncate">{a.notes}</span>
                   )}

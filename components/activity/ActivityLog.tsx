@@ -11,6 +11,7 @@ import {
 } from "@/lib/period"
 import type { Database } from "@/lib/supabase/types"
 import { UnlockAction } from "@/components/unlock/UnlockControls"
+import { activityLabel, needsCategory, sumMinutes, toneOf, TONE_TILE } from "@/lib/activityKind"
 
 type ActivityRow = Database["public"]["Tables"]["activities"]["Row"]
 type ReviewLite = {
@@ -111,6 +112,8 @@ export function ActivityLog({
 
   const mins = computeMvfMinutes(activities)
   const approvedMins = computeMvfMinutes(activities.filter(a => a.status === "approved")).total
+  const cat = sumMinutes(activities)
+  const needsCount = activities.filter(needsCategory).length
 
   return (
     <div className="bg-white rounded-xl border border-[#E8E6F4] overflow-hidden">
@@ -158,6 +161,9 @@ export function ActivityLog({
             { label: "Independent", value: formatHM(mins.independent), cls: "text-blue-600" },
             { label: "Supervised", value: formatHM(mins.supervised), cls: "text-emerald-600" },
             { label: "Observation", value: formatHM(mins.observation), cls: "text-violet-600" },
+            { label: "Restricted", value: formatHM(cat.restricted), cls: "text-violet-600" },
+            { label: "Unrestricted", value: formatHM(cat.unrestricted), cls: "text-blue-600" },
+            { label: needsCount ? `Needs category (${needsCount})` : "Needs category", value: formatHM(cat.uncategorized), cls: cat.uncategorized ? "text-amber-600" : "text-zinc-400" },
           ].map(s => (
             <div key={s.label} className="text-center bg-zinc-50 rounded-lg py-2">
               <p className={cn("text-sm font-bold", s.cls)}>{s.value}</p>
@@ -199,17 +205,14 @@ export function ActivityLog({
                   const s = STATUS_STYLE[a.status] ?? STATUS_STYLE.draft
                   const row = (
                     <div className="flex items-center gap-3 px-4 py-2.5">
-                      <div className={cn(
-                        "w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
-                        a.category === "Restricted" ? "bg-violet-100 text-violet-700" :
-                        a.category === "Supervision" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
-                      )}>
+                      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0", TONE_TILE[toneOf(a)])}>
                         {formatHM(a.duration_minutes)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-zinc-900 truncate">{a.title}</p>
                         <p className="text-[11px] text-zinc-400">
-                          {dayLabel(a.date)} · {formatTime(a.start_time)} – {formatTime(a.end_time)} · {a.category}
+                          {dayLabel(a.date)} · {formatTime(a.start_time)} – {formatTime(a.end_time)} ·{" "}
+                          <span className={needsCategory(a) ? "text-amber-700 font-semibold" : undefined}>{activityLabel(a)}</span>
                           {a.observation_with_client ? ` · ${a.observation_duration_minutes}m observation` : ""}
                         </p>
                       </div>

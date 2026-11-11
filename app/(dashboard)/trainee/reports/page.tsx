@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Download, ChevronRight, CheckCircle2, AlertTriangle, Clock, FileText } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { sumHours } from "@/lib/activityKind"
 import type { Database } from "@/lib/supabase/types"
 import { formatMonthLabel, monthOf, toDateStr } from "@/lib/period"
 import { FvfPanel } from "@/components/mvf/FvfPanel"
@@ -80,7 +81,7 @@ export default function ReportsPage() {
       const [sumsRes, tpRes, actsRes] = await Promise.all([
         supabase.from("monthly_summaries").select("*").eq("trainee_id", user.id).order("month", { ascending: false }),
         supabase.from("trainee_profiles").select("target_hours").eq("id", user.id).single(),
-        supabase.from("activities").select("duration_minutes, category").eq("trainee_id", user.id).gte("date", monthStart).lt("date", monthEnd),
+        supabase.from("activities").select("*").eq("trainee_id", user.id).gte("date", monthStart).lt("date", monthEnd),
       ])
       setSummaries((sumsRes.data ?? []) as MonthlySummary[])
       const tp = tpRes.data as { target_hours: number } | null
@@ -89,9 +90,9 @@ export default function ReportsPage() {
       const acts = (actsRes.data ?? []) as { duration_minutes: number; category: string }[]
       if (acts.length > 0) {
         const totalH = acts.reduce((s, a) => s + a.duration_minutes, 0) / 60
-        const restrictedH = acts.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-        const unrestrictedH = acts.filter(a => a.category === "Unrestricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-        const supervisionH = acts.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+        const restrictedH = sumHours(acts).restricted
+        const unrestrictedH = sumHours(acts).unrestricted
+        const supervisionH = sumHours(acts).supervision
         setLiveMonth({
           totalH, restrictedH, unrestrictedH, supervisionH,
           restrictedPct: totalH > 0 ? (restrictedH / totalH) * 100 : 0,

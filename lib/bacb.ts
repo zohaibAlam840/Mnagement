@@ -1,13 +1,17 @@
 // BACB compliance — single source of truth for thresholds and monthly metrics.
 // Do NOT hardcode these numbers anywhere else; import from here.
 
+import { activityTypeOf, needsCategory, sumMinutes } from "./activityKind"
+
 export type FieldworkType = "supervised" | "concentrated"
 export type RequirementsYear = "2022" | "2027" | "both"
 
 export type ActivityLike = {
   duration_minutes: number
-  category: string // "Restricted" | "Unrestricted" | "Supervision"
-  session_type?: "individual" | "group" | null
+  category: string | null // "Restricted" | "Unrestricted" (null = legacy, needs review)
+  activity_type?: string | null
+  subcategory?: string | null
+  session_type?: "individual" | "group" | string | null
   observation_with_client?: boolean | null
   observation_duration_minutes?: number | null
 }
@@ -72,6 +76,8 @@ export type Metrics = {
   totalH: number
   restrictedH: number
   unrestrictedH: number
+  uncategorizedH: number // legacy supervision/observation still missing a category
+  uncategorizedCount: number
   supervisionH: number
   individualSupH: number
   groupSupH: number
@@ -88,20 +94,20 @@ export type Metrics = {
 const round1 = (n: number) => Math.round(n * 10) / 10
 
 export function computeMetrics(acts: ActivityLike[]): Metrics {
-  const mins = (xs: ActivityLike[]) => xs.reduce((s, a) => s + (a.duration_minutes ?? 0), 0)
-
-  const supervision = acts.filter(a => a.category === "Supervision")
-  // Mirror the sign-off generator: null session_type counts as individual hours.
-  const individualSup = supervision.filter(a => a.session_type === "individual" || a.session_type == null)
-  const groupSup = supervision.filter(a => a.session_type === "group")
+  // Supervised and observation hours count toward their Restricted/Unrestricted
+  // total as well as supervision; each entry counts once toward the total.
+  const t = sumMinutes(acts)
+  const individualOnly = acts.filter(a => activityTypeOf(a) === "INDIVIDUAL_SUPERVISION")
+  const groupSup = acts.filter(a => activityTypeOf(a) === "GROUP_SUPERVISION")
   const observations = acts.filter(a => a.observation_with_client === true)
 
-  const totalMin = mins(acts)
-  const restrictedMin = mins(acts.filter(a => a.category === "Restricted"))
-  const unrestrictedMin = mins(acts.filter(a => a.category === "Unrestricted"))
-  const supervisionMin = mins(supervision)
-  const individualMin = mins(individualSup)
-  const groupMin = mins(groupSup)
+  const totalMin = t.total
+  const restrictedMin = t.restricted
+  const unrestrictedMin = t.unrestricted
+  const supervisionMin = t.supervision
+  // Observation sessions count with individual hours (as on the sign-off form).
+  const individualMin = t.individual + t.observation
+  const groupMin = t.group
 
   const totalH = round1(totalMin / 60)
   const supervisionH = round1(supervisionMin / 60)
@@ -110,6 +116,8 @@ export function computeMetrics(acts: ActivityLike[]): Metrics {
     totalH,
     restrictedH: round1(restrictedMin / 60),
     unrestrictedH: round1(unrestrictedMin / 60),
+    uncategorizedH: round1(t.uncategorized / 60),
+    uncategorizedCount: acts.filter(needsCategory).length,
     supervisionH,
     individualSupH: round1(individualMin / 60),
     groupSupH: round1(groupMin / 60),
@@ -117,14 +125,11 @@ export function computeMetrics(acts: ActivityLike[]): Metrics {
     groupSupPct: supervisionMin > 0 ? round1((groupMin / supervisionMin) * 100) : 0,
     restrictedPct: totalMin > 0 ? round1((restrictedMin / totalMin) * 100) : 0,
     // Meetings counted by session_type; observations counted separately.
-    individualMeetings: supervision.filter(a => a.session_type === "individual").length,
+    individualMeetings: individualOnly.length,
     groupMeetings: groupSup.length,
     obsCount: observations.length,
     obsMinutes: observations.reduce((s, a) => s + (a.observation_duration_minutes ?? 0), 0),
-    contacts:
-      supervision.filter(a => a.session_type === "individual").length +
-      groupSup.length +
-      observations.length,
+    contacts: individualOnly.length + groupSup.length + observations.length,
   }
 }
 

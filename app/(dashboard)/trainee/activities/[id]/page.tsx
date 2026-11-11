@@ -10,7 +10,11 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
-import { ACTIVITY_KINDS, kindToFields, rowToKind, type ActivityKind } from "@/lib/activityKind"
+import {
+  activityLabel, activityTypeOf, categoryOf, isSupervision, kindNeedsCategory, kindToFields, needsCategory,
+  rowToKind, toneOf, TONE_BADGE, TONE_DOT, TYPE_LABEL, type ActivityKind, type FieldworkCategory,
+} from "@/lib/activityKind"
+import { KindPicker, CategoryToggle } from "@/components/activity/KindPicker"
 import { api } from "@/lib/api"
 import { formatWeekRange, weekStartOf } from "@/lib/period"
 import { RequestUnlock, type UnlockRequestRow } from "@/components/unlock/UnlockControls"
@@ -45,6 +49,10 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
   const [title, setTitle] = useState("")
   const [notes, setNotes] = useState("")
   const [kind, setKind] = useState<ActivityKind>("Restricted")
+  const [categoryToggle, setCategoryToggle] = useState<FieldworkCategory | null>(null)
+  const [triedSave, setTriedSave] = useState(false)
+  const [fixCategory, setFixCategory] = useState<FieldworkCategory | null>(null)
+  const [fixing, setFixing] = useState(false)
   const [observationType, setObservationType] = useState<"direct" | "remote" | "indirect">("direct")
   const [observationMinutes, setObservationMinutes] = useState(0)
 
@@ -66,6 +74,7 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
       setTitle(data.title)
       setNotes(data.notes ?? "")
       setKind(rowToKind(data))
+      setCategoryToggle(isSupervision(data) ? categoryOf(data) : null)
       setObservationType(data.observation_type ?? "direct")
       setObservationMinutes(data.observation_duration_minutes ?? 0)
 
@@ -86,10 +95,15 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
 
   const handleSave = async () => {
     if (!activity) return
+    setTriedSave(true)
+    setActionError("")
+    if (kindNeedsCategory(kind) && !categoryToggle) {
+      setActionError("Select Restricted or Unrestricted for this supervision/observation entry.")
+      return
+    }
     setSaving(true)
     const supabase = createClient()
-    const fields = kindToFields(kind, observationMinutes)
-    setActionError("")
+    const fields = kindToFields(kind, categoryToggle, observationMinutes)
     const { data, error } = await supabase
       .from("activities")
       .update({
@@ -105,6 +119,22 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
     if (error) { setActionError(error.message); return }
     if (data) setActivity(data)
     setEditing(false)
+    setTriedSave(false)
+  }
+
+  // Locked legacy entry: save only the missing Restricted/Unrestricted
+  const handleFixCategory = async () => {
+    if (!activity || !fixCategory) return
+    setFixing(true)
+    setActionError("")
+    try {
+      await api("/api/activities/category", { body: { ids: [activity.id], category: fixCategory } })
+      setActivity({ ...activity, category: fixCategory })
+      setCategoryToggle(fixCategory)
+    } catch (e) {
+      setActionError((e as Error).message)
+    }
+    setFixing(false)
   }
 
   const handleDelete = async () => {
@@ -173,6 +203,8 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
                   setTitle(activity.title)
                   setNotes(activity.notes ?? "")
                   setKind(rowToKind(activity))
+                  setCategoryToggle(isSupervision(activity) ? categoryOf(activity) : null)
+                  setTriedSave(false)
                   setObservationType(activity.observation_type ?? "direct")
                   setObservationMinutes(activity.observation_duration_minutes ?? 0)
                 }}
@@ -232,25 +264,48 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
+      {needsCategory(activity) && !editing && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-900">Needs Restricted or Unrestricted</p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                This {TYPE_LABEL[activityTypeOf(activity)].toLowerCase()} entry was logged before a category was required.
+                {locked ? " Only the category is saved; hours and approval stay the same." : ""}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                <div className="w-56"><CategoryToggle compact value={fixCategory} onChange={setFixCategory} disabled={fixing} /></div>
+                <button
+                  onClick={handleFixCategory}
+                  disabled={!fixCategory || fixing}
+                  className="text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 px-3 py-1.5 rounded-lg disabled:opacity-50"
+                >
+                  {fixing ? "Saving…" : "Save category"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <div className="bg-white rounded-xl border border-[#E8E6F4] p-4 mb-5">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Activity Type</p>
+          <KindPicker
+            kind={kind}
+            onKind={(k) => { setKind(k); setCategoryToggle(null); setTriedSave(false) }}
+            category={categoryToggle}
+            onCategory={setCategoryToggle}
+            showError={triedSave}
+          />
+        </div>
+      )}
+
       {/* Status badges */}
-      <div className="flex items-center gap-2 mb-5">
-        <span className={cn(
-          "flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border",
-          activity.category === "Restricted" ? "bg-violet-50 text-violet-700 border-violet-100" :
-          activity.category === "Supervision" ? "bg-emerald-50 text-emerald-700 border-emerald-100" :
-          "bg-blue-50 text-blue-700 border-blue-100"
-        )}>
-          {editing ? (
-            <select
-              value={kind}
-              onChange={(e) => setKind(e.target.value as ActivityKind)}
-              className="bg-transparent focus:outline-none text-xs font-semibold"
-            >
-              {ACTIVITY_KINDS.map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          ) : activity.category}
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        <span className={cn("flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border", TONE_BADGE[toneOf(activity)])}>
+          {activityLabel(activity)}
         </span>
         <span className={cn(
           "text-xs font-semibold px-3 py-1.5 rounded-full",
@@ -277,7 +332,8 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
           { icon: <Calendar className="w-4 h-4 text-zinc-400" />, label: "Date", value: formatDate(activity.date) },
           { icon: <AlarmClock className="w-4 h-4 text-zinc-400" />, label: "Time", value: `${formatTime(activity.start_time)} – ${formatTime(activity.end_time)}` },
           { icon: <Clock className="w-4 h-4 text-zinc-400" />, label: "Duration", value: `${durationHours.toFixed(1)} hours` },
-          { icon: <div className={cn("w-3 h-3 rounded-full", activity.category === "Restricted" ? "bg-violet-500" : activity.category === "Supervision" ? "bg-emerald-500" : "bg-blue-500")} />, label: "Category", value: activity.category },
+          { icon: null, label: "Activity type", value: TYPE_LABEL[activityTypeOf(activity)] },
+          { icon: <div className={cn("w-3 h-3 rounded-full", TONE_DOT[toneOf(activity)])} />, label: "Category", value: categoryOf(activity) ?? "Needs category" },
           { icon: null, label: "Subcategory", value: activity.subcategory ?? "—" },
         ].map((row, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-3.5">
@@ -337,7 +393,7 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
             )
           ) : (
             <>
-              {activity.category === "Supervision" && activity.session_type && (
+              {isSupervision(activity) && activity.session_type && (
                 <span className={cn(
                   "text-xs font-semibold px-3 py-1.5 rounded-full border capitalize",
                   activity.session_type === "individual"
@@ -361,7 +417,7 @@ export default function ActivityDetail({ params }: { params: Promise<{ id: strin
                   )}
                 </>
               )}
-              {!activity.supervision_present && !activity.observation_with_client && activity.category !== "Supervision" && (
+              {!activity.supervision_present && !activity.observation_with_client && !isSupervision(activity) && (
                 <span className="text-xs text-zinc-400 italic">No supervision flags</span>
               )}
             </>

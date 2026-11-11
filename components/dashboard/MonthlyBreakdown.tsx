@@ -108,8 +108,8 @@ export default function MonthlyBreakdown({ m, monthLabel, supCls, reqContacts, r
           <div className="mt-3 grid grid-cols-3 gap-3 text-center">
             {[
               { label: "Restricted", value: `${m.restrictedH}h`, note: `${m.restrictedPct}% (not capped monthly)` },
-              { label: "Unrestricted", value: `${m.unrestrictedH}h`, note: "coordination etc." },
-              { label: "Supervision", value: `${m.supervisionH}h`, note: `${m.supervisionPct}% of total` },
+              { label: "Unrestricted", value: `${m.unrestrictedH}h`, note: m.uncategorizedH > 0 ? `${m.uncategorizedH}h need a category` : "incl. supervision" },
+              { label: "Supervision", value: `${m.supervisionH}h`, note: `${m.supervisionPct}% · also in R/U` },
             ].map((b) => (
               <div key={b.label} className="bg-zinc-50 rounded-lg py-3">
                 <p className="text-lg font-bold text-zinc-900">{b.value}</p>

@@ -1,18 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2, AlertCircle, Users, Eye } from "lucide-react"
+import { ChevronLeft, Clock, User, Tag, AlignLeft, Calendar, CheckCircle2, AlertCircle, Eye } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { KindPicker } from "@/components/activity/KindPicker"
+import {
+  kindNeedsCategory, kindToFields, resolveCategory, activityLabel,
+  type ActivityKind, type FieldworkCategory,
+} from "@/lib/activityKind"
 
-const CATEGORIES = ["Restricted", "Unrestricted", "Supervision"] as const
-type Category = typeof CATEGORIES[number]
-type SessionType = "individual" | "group"
 type ObservationType = "direct" | "remote" | "indirect"
 
-const SUBCATEGORIES: Record<Category, string[]> = {
+const SUBCATEGORIES: Record<ActivityKind, string[]> = {
   Restricted: [
     "Discrete Trial Training",
     "Natural Environment Training",
@@ -30,12 +31,9 @@ const SUBCATEGORIES: Record<Category, string[]> = {
     "Documentation",
     "Other Unrestricted",
   ],
-  Supervision: [
-    "Individual Supervision",
-    "Group Supervision",
-    "Case Review",
-    "Other Supervision",
-  ],
+  "Individual Supervision": ["Individual Supervision", "Case Review", "Other Supervision"],
+  "Group Supervision": ["Group Supervision", "Case Review", "Other Supervision"],
+  Observation: ["Observation — Direct", "Observation — Remote", "Observation — Indirect"],
 }
 
 function getWeekStart(dateStr: string): string {
@@ -46,51 +44,51 @@ function getWeekStart(dateStr: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-export default function NewActivityPage() {
-  const router = useRouter()
-  const today = new Date().toISOString().split("T")[0]
+function localToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
 
+export default function NewActivityPage() {
   const [title, setTitle] = useState("")
-  const [date, setDate] = useState(today)
+  const [date, setDate] = useState(localToday)
   const [startTime, setStartTime] = useState("09:00")
   const [endTime, setEndTime] = useState("11:00")
-  const [category, setCategory] = useState<Category>("Restricted")
+  const [kind, setKind] = useState<ActivityKind>("Restricted")
+  // Required for supervision/observation; never preselected
+  const [categoryToggle, setCategoryToggle] = useState<FieldworkCategory | null>(null)
   const [subcategory, setSubcategory] = useState(SUBCATEGORIES["Restricted"][0])
   const [client, setClient] = useState("")
 
-  // Supervision type — required when category = Supervision
-  const [sessionType, setSessionType] = useState<SessionType>("individual")
-
-  // Supervision-related flag — for non-Supervision activities done under a supervisor
-  const [supervisionRelated, setSupervisionRelated] = useState(false)
-
-  // Observation
-  const [hasObservation, setHasObservation] = useState(false)
   const [observationType, setObservationType] = useState<ObservationType>("direct")
-  const [observationMinutes, setObservationMinutes] = useState(0)
+  const [observationMinutes, setObservationMinutes] = useState<number | null>(null)
 
   const [notes, setNotes] = useState("")
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState<string | null>(null)
   const [error, setError] = useState("")
+  const [triedSave, setTriedSave] = useState(false)
 
   const startMinutes = parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1])
   const endMinutes = parseInt(endTime.split(":")[0]) * 60 + parseInt(endTime.split(":")[1])
   const durationMinutes = Math.max(0, endMinutes - startMinutes)
   const durationHours = durationMinutes / 60
+  const category = resolveCategory(kind, categoryToggle)
+  const missingCategory = kindNeedsCategory(kind) && !category
+  const obsMinutes = observationMinutes ?? durationMinutes
 
-  const handleCategoryChange = (c: Category) => {
-    setCategory(c)
-    setSubcategory(SUBCATEGORIES[c][0])
-    if (c === "Supervision") {
-      setSupervisionRelated(false)
-    }
+  const handleKindChange = (k: ActivityKind) => {
+    setKind(k)
+    setSubcategory(SUBCATEGORIES[k][0])
+    setCategoryToggle(null)
+    setTriedSave(false)
   }
 
   const handleSave = async () => {
     setError("")
-    if (category === "Supervision" && !sessionType) {
-      setError("Please select Individual or Group for this supervision activity.")
+    setTriedSave(true)
+    if (missingCategory) {
+      setError("Select Restricted or Unrestricted for this supervision/observation entry.")
       return
     }
     setSaving(true)
@@ -99,6 +97,7 @@ export default function NewActivityPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError("Not signed in"); setSaving(false); return }
 
+    const fields = kindToFields(kind, categoryToggle, obsMinutes)
     const { error: insertError } = await supabase.from("activities").insert({
       trainee_id: user.id,
       title,
@@ -106,14 +105,10 @@ export default function NewActivityPage() {
       start_time: startTime + ":00",
       end_time: endTime + ":00",
       duration_minutes: durationMinutes,
-      category,
       subcategory,
       client_name: client || null,
-      session_type: category === "Supervision" ? sessionType : null,
-      observation_with_client: hasObservation,
-      observation_type: hasObservation ? observationType : null,
-      observation_duration_minutes: hasObservation ? observationMinutes : 0,
-      supervision_present: category === "Supervision" ? true : supervisionRelated,
+      ...fields,
+      observation_type: kind === "Observation" ? observationType : null,
       notes: notes || null,
       status: "draft",
       week_start_date: getWeekStart(date),
@@ -121,7 +116,7 @@ export default function NewActivityPage() {
 
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
-    setSaved(true)
+    setSaved(activityLabel(fields))
   }
 
   if (saved) {
@@ -132,11 +127,11 @@ export default function NewActivityPage() {
         </div>
         <h2 className="text-xl font-bold text-zinc-900 mb-1">Activity logged!</h2>
         <p className="text-sm text-zinc-500 mb-6">
-          {durationHours.toFixed(1)} hours of {category} activity saved.
+          {durationHours.toFixed(1)} hours saved as {saved}.
         </p>
         <div className="flex gap-3">
           <button
-            onClick={() => { setSaved(false); setTitle(""); setNotes(""); setClient(""); setHasObservation(false) }}
+            onClick={() => { setSaved(null); setTitle(""); setNotes(""); setClient(""); setCategoryToggle(null); setTriedSave(false); setObservationMinutes(null) }}
             className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 transition-colors"
           >
             Log another
@@ -148,6 +143,8 @@ export default function NewActivityPage() {
       </div>
     )
   }
+
+  const canSave = !!title && durationMinutes > 0 && !saving
 
   return (
     <div className="p-4 md:p-7 max-w-2xl mx-auto">
@@ -218,115 +215,44 @@ export default function NewActivityPage() {
           </div>
         </div>
 
-        {/* Category */}
+        {/* Activity type + Restricted/Unrestricted */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
           <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-            <Tag className="w-3.5 h-3.5" /> BACB Category
+            <Tag className="w-3.5 h-3.5" /> Activity Type
           </label>
-          <div className="flex gap-2 mb-4">
-            {CATEGORIES.map((c) => (
-              <button
-                key={c}
-                onClick={() => handleCategoryChange(c)}
-                className={cn(
-                  "flex-1 py-2 text-xs font-semibold rounded-lg border transition-all",
-                  category === c
-                    ? c === "Restricted" ? "bg-violet-600 text-white border-violet-600" :
-                      c === "Supervision" ? "bg-emerald-600 text-white border-emerald-600" :
-                      "bg-blue-600 text-white border-blue-600"
-                    : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
-                )}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-          <div>
+          <KindPicker
+            kind={kind}
+            onKind={handleKindChange}
+            category={categoryToggle}
+            onCategory={c => { setCategoryToggle(c); setError("") }}
+            showError={triedSave}
+          />
+          {kindNeedsCategory(kind) && (
+            <p className="text-[11px] text-zinc-400 mt-2">
+              Supervision and observation hours count toward your Restricted or Unrestricted total as well as your supervised hours.
+              {kind === "Group Supervision" && " Group supervision must not exceed 50% of total supervision time."}
+            </p>
+          )}
+          <div className="mt-4">
             <p className="text-xs text-zinc-500 mb-1.5">Subcategory</p>
             <select
               value={subcategory}
               onChange={(e) => setSubcategory(e.target.value)}
               className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all bg-white"
             >
-              {SUBCATEGORIES[category].map((s) => (
+              {SUBCATEGORIES[kind].map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
           </div>
         </div>
 
-        {/* Supervision Type — only shown when category = Supervision */}
-        {category === "Supervision" && (
-          <div className="bg-white rounded-xl border border-emerald-100 p-5">
+        {/* Observation details */}
+        {kind === "Observation" && (
+          <div className="bg-white rounded-xl border border-violet-100 p-5">
             <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-              <Users className="w-3.5 h-3.5" /> Supervision Type
+              <Eye className="w-3.5 h-3.5" /> Observation
             </label>
-            <p className="text-xs text-zinc-400 mb-3">
-              Group supervision must not exceed 50% of total supervision time (BACB requirement).
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {(["individual", "group"] as SessionType[]).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setSessionType(type)}
-                  className={cn(
-                    "flex flex-col items-center gap-1.5 py-3 px-4 rounded-xl border-2 transition-all text-sm font-semibold capitalize",
-                    sessionType === type
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                      : "border-zinc-200 text-zinc-500 hover:border-zinc-300"
-                  )}
-                >
-                  <Users className={cn("w-4 h-4", sessionType === type ? "text-emerald-600" : "text-zinc-400")} />
-                  {type === "individual" ? "Individual" : "Group"}
-                  <span className="text-[10px] font-normal text-zinc-400">
-                    {type === "individual" ? "1-on-1 supervision" : "≤50% of total supervision"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Client */}
-        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-          <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-            <User className="w-3.5 h-3.5" /> Client (optional)
-          </label>
-          <input
-            value={client}
-            onChange={(e) => setClient(e.target.value)}
-            placeholder="e.g. Client A"
-            className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
-          />
-        </div>
-
-        {/* Observation */}
-        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-          <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-            <Eye className="w-3.5 h-3.5" /> Observation
-          </label>
-          <button
-            onClick={() => setHasObservation(!hasObservation)}
-            className={cn(
-              "w-full flex items-start gap-3 text-left px-4 py-3 rounded-xl border transition-all mb-3",
-              hasObservation ? "border-violet-200 bg-violet-50" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
-            )}
-          >
-            <div className={cn(
-              "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
-              hasObservation ? "bg-violet-600 border-violet-600" : "border-zinc-300"
-            )}>
-              {hasObservation && <div className="w-2 h-2 rounded-full bg-white" />}
-            </div>
-            <div>
-              <p className={cn("text-sm font-semibold", hasObservation ? "text-violet-800" : "text-zinc-700")}>
-                Observation occurred during this activity
-              </p>
-              <p className="text-xs text-zinc-400 mt-0.5">Required at least once per supervisory period</p>
-            </div>
-          </button>
-
-          {hasObservation && (
             <div className="space-y-3">
               <div>
                 <p className="text-xs text-zinc-500 mb-1.5">Observation Type</p>
@@ -348,49 +274,34 @@ export default function NewActivityPage() {
                 </div>
               </div>
               <div>
-                <p className="text-xs text-zinc-500 mb-1.5">Observation duration (minutes)</p>
+                <p className="text-xs text-zinc-500 mb-1.5">Minutes observed with client</p>
                 <input
                   type="number"
                   min="0"
-                  value={observationMinutes}
+                  value={obsMinutes}
                   onChange={(e) => setObservationMinutes(parseInt(e.target.value) || 0)}
-                  placeholder="e.g. 60"
                   className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
                 />
                 <p className="text-[11px] text-zinc-400 mt-1">
-                  2027 BACB minimum: Concentrated = 90 min/month · Supervised = 60 min/month
+                  Defaults to the session length. 2027 BACB minimum: Concentrated = 90 min/month · Supervised = 60 min/month
                 </p>
               </div>
             </div>
-          )}
-        </div>
-
-        {/* Supervision-related flag — only for non-Supervision categories */}
-        {category !== "Supervision" && (
-          <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
-            <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">Additional Flags</p>
-            <button
-              onClick={() => setSupervisionRelated(!supervisionRelated)}
-              className={cn(
-                "w-full flex items-start gap-3 text-left px-4 py-3 rounded-xl border transition-all",
-                supervisionRelated ? "border-violet-200 bg-violet-50" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
-              )}
-            >
-              <div className={cn(
-                "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
-                supervisionRelated ? "bg-violet-600 border-violet-600" : "border-zinc-300"
-              )}>
-                {supervisionRelated && <div className="w-2 h-2 rounded-full bg-white" />}
-              </div>
-              <div>
-                <p className={cn("text-sm font-semibold", supervisionRelated ? "text-violet-800" : "text-zinc-700")}>
-                  Supervision-related
-                </p>
-                <p className="text-xs text-zinc-400 mt-0.5">This activity was conducted under active supervision</p>
-              </div>
-            </button>
           </div>
         )}
+
+        {/* Client */}
+        <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
+          <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
+            <User className="w-3.5 h-3.5" /> Client (optional)
+          </label>
+          <input
+            value={client}
+            onChange={(e) => setClient(e.target.value)}
+            placeholder="e.g. Client A"
+            className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all"
+          />
+        </div>
 
         {/* Notes */}
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5">
@@ -414,16 +325,16 @@ export default function NewActivityPage() {
         {/* Save */}
         <button
           onClick={handleSave}
-          disabled={!title || durationMinutes <= 0 || saving}
+          disabled={!canSave}
           className={cn(
             "w-full py-3.5 text-sm font-semibold rounded-xl transition-colors",
-            title && durationMinutes > 0 && !saving
-              ? "bg-violet-600 text-white hover:bg-violet-700"
-              : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
+            canSave ? "bg-violet-600 text-white hover:bg-violet-700" : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
           )}
         >
           {saving ? "Saving…" : title && durationMinutes > 0
-            ? `Save ${durationHours.toFixed(1)}h ${category} Activity`
+            ? missingCategory
+              ? "Select Restricted or Unrestricted"
+              : `Save ${durationHours.toFixed(1)}h ${kind}${kindNeedsCategory(kind) ? ` · ${category}` : ""}`
             : "Fill in title and time to continue"}
         </button>
       </div>

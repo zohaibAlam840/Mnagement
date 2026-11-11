@@ -13,6 +13,7 @@ import {
 } from "@/lib/bacb"
 import { MvfPanel } from "@/components/mvf/MvfPanel"
 import { ActivityLog } from "@/components/activity/ActivityLog"
+import { sumHours, type MinuteTotals } from "@/lib/activityKind"
 
 type MonthlySummary = Database["public"]["Tables"]["monthly_summaries"]["Row"]
 type ContactBreakdown = { individualMeetings: number; groupMeetings: number; obsCount: number; contacts: number }
@@ -30,6 +31,7 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState("")
   const [reloadKey, setReloadKey] = useState(0)
+  const [liveHours, setLiveHours] = useState<MinuteTotals | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -57,12 +59,13 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
       // live from the month's non-draft activities.
       const { data: actsRaw } = await (supabase as any)
         .from("activities")
-        .select("duration_minutes, category, session_type, observation_with_client, observation_duration_minutes")
+        .select("*")
         .eq("trainee_id", user.id)
         .gte("date", monthStart)
         .lt("date", nextMonth)
         .neq("status", "draft")
       const metrics = computeMetrics(actsRaw ?? [])
+      setLiveHours(sumHours((actsRaw ?? []).filter((a: { status: string }) => a.status === "approved")))
       setContacts({
         individualMeetings: metrics.individualMeetings,
         groupMeetings: metrics.groupMeetings,
@@ -106,7 +109,12 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
   const ft = summary.fieldwork_type as FieldworkType
   const ry = summary.requirements_year as RequirementsYear
   const supervisionH = summary.supervision_hours_individual + summary.supervision_hours_group
-  const restrictedPct = summary.total_hours > 0 ? (summary.restricted_hours / summary.total_hours) * 100 : 0
+  // Restricted/Unrestricted come from the live entries (supervision now counts in
+  // them); summaries saved before Nov 2026 used the old split.
+  const restrictedH = liveHours?.restricted ?? summary.restricted_hours
+  const unrestrictedH = liveHours?.unrestricted ?? summary.unrestricted_hours
+  const uncategorizedH = liveHours?.uncategorized ?? 0
+  const restrictedPct = summary.total_hours > 0 ? (restrictedH / summary.total_hours) * 100 : 0
   const supervisionPct = summary.total_hours > 0 ? (supervisionH / summary.total_hours) * 100 : 0
   const groupSupPct = supervisionH > 0 ? (summary.supervision_hours_group / supervisionH) * 100 : 0
   const minSupervision = minSupervisionPct(ft, ry)
@@ -168,8 +176,8 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
           { label: "Total Hours", value: summary.total_hours, color: "text-zinc-900" },
-          { label: "Restricted", value: summary.restricted_hours, color: "text-violet-600" },
-          { label: "Unrestricted", value: summary.unrestricted_hours, color: "text-blue-600" },
+          { label: "Restricted", value: restrictedH, color: "text-violet-600" },
+          { label: "Unrestricted", value: unrestrictedH, color: "text-blue-600" },
           { label: "Supervision", value: supervisionH, color: "text-emerald-600" },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-4">
@@ -184,21 +192,28 @@ export default function MonthlyReportDetail({ params }: { params: Promise<{ mont
         <div className="bg-white rounded-xl border border-[#E8E6F4] p-5 mb-5">
           <h3 className="text-sm font-semibold text-zinc-900 mb-3">Hours Breakdown</h3>
           <div className="flex h-8 rounded-lg overflow-hidden gap-0.5 mb-3">
-            <div className="bg-violet-500 flex items-center justify-center" style={{ width: `${(summary.restricted_hours / summary.total_hours) * 100}%` }}>
-              {summary.restricted_hours > 0 && <span className="text-[10px] font-bold text-white">{summary.restricted_hours.toFixed(1)}h</span>}
+            <div className="bg-violet-500 flex items-center justify-center" style={{ width: `${(restrictedH / summary.total_hours) * 100}%` }}>
+              {restrictedH > 0 && <span className="text-[10px] font-bold text-white">{restrictedH.toFixed(1)}h</span>}
             </div>
-            <div className="bg-blue-400 flex items-center justify-center" style={{ width: `${(summary.unrestricted_hours / summary.total_hours) * 100}%` }}>
-              {summary.unrestricted_hours > 0 && <span className="text-[10px] font-bold text-white">{summary.unrestricted_hours.toFixed(1)}h</span>}
+            <div className="bg-blue-400 flex items-center justify-center" style={{ width: `${(unrestrictedH / summary.total_hours) * 100}%` }}>
+              {unrestrictedH > 0 && <span className="text-[10px] font-bold text-white">{unrestrictedH.toFixed(1)}h</span>}
             </div>
-            <div className="bg-emerald-400 flex items-center justify-center" style={{ width: `${(supervisionH / summary.total_hours) * 100}%` }}>
-              {supervisionH > 0 && <span className="text-[10px] font-bold text-white">{supervisionH.toFixed(1)}h</span>}
-            </div>
+            {uncategorizedH > 0.05 && (
+              <div className="bg-amber-400 flex items-center justify-center" style={{ width: `${(uncategorizedH / summary.total_hours) * 100}%` }}>
+                <span className="text-[10px] font-bold text-white">{uncategorizedH.toFixed(1)}h</span>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-4 text-xs text-zinc-500">
+          {/* Supervision is part of the Restricted/Unrestricted totals above, shown as its share of the month */}
+          <div className="h-2 rounded-full bg-zinc-100 overflow-hidden mb-3">
+            <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (supervisionH / summary.total_hours) * 100)}%` }} />
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-500">
             {[
               { color: "bg-violet-500", label: "Restricted" },
               { color: "bg-blue-400", label: "Unrestricted" },
-              { color: "bg-emerald-400", label: "Supervision" },
+              ...(uncategorizedH > 0.05 ? [{ color: "bg-amber-400", label: "Needs category" }] : []),
+              { color: "bg-emerald-400", label: `Supervision ${supervisionH.toFixed(1)}h (within R/U)` },
             ].map((l) => (
               <div key={l.label} className="flex items-center gap-1.5">
                 <div className={cn("w-2.5 h-2.5 rounded-sm", l.color)} />

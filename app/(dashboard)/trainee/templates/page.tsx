@@ -6,6 +6,8 @@ import { Plus, Repeat2, ToggleLeft, ToggleRight, Clock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Database } from "@/lib/supabase/types"
+import { KindBadge } from "@/components/activity/KindPicker"
+import { sumMinutes, toneOf, TONE_SOLID, TONE_TEXT, TONE_TILE } from "@/lib/activityKind"
 
 type TemplateRow = Database["public"]["Tables"]["activity_templates"]["Row"]
 
@@ -56,16 +58,15 @@ export default function TemplatesPage() {
 
   const activeTemplates = templates.filter((t) => t.active)
 
-  const restrictedH = activeTemplates
-    .filter((t) => t.category === "Restricted")
-    .reduce((s, t) => s + durationHours(t.start_time, t.end_time) * t.days.length, 0)
-  const unrestrictedH = activeTemplates
-    .filter((t) => t.category === "Unrestricted")
-    .reduce((s, t) => s + durationHours(t.start_time, t.end_time) * t.days.length, 0)
-  const supervisionH = activeTemplates
-    .filter((t) => t.category === "Supervision")
-    .reduce((s, t) => s + durationHours(t.start_time, t.end_time) * t.days.length, 0)
-  const totalH = restrictedH + unrestrictedH + supervisionH
+  // Weekly projection: supervision templates also count toward Restricted/Unrestricted
+  const projected = sumMinutes(activeTemplates.map((t) => ({
+    ...t, duration_minutes: durationHours(t.start_time, t.end_time) * 60 * t.days.length,
+  })))
+  const restrictedH = projected.restricted / 60
+  const unrestrictedH = projected.unrestricted / 60
+  const uncategorizedH = projected.uncategorized / 60
+  const supervisionH = projected.supervision / 60
+  const totalH = projected.total / 60
 
   return (
     <div className="p-4 md:p-7 max-w-4xl mx-auto">
@@ -121,16 +122,8 @@ export default function TemplatesPage() {
               )}>
                 <div className="flex items-start justify-between mb-3">
                   <Link href={`/trainee/templates/${t.id}`} className="flex items-center gap-2.5 flex-1 min-w-0 hover:opacity-80 transition-opacity">
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
-                      t.category === "Restricted" ? "bg-violet-100" :
-                      t.category === "Supervision" ? "bg-emerald-100" : "bg-blue-100"
-                    )}>
-                      <Repeat2 className={cn(
-                        "w-4 h-4",
-                        t.category === "Restricted" ? "text-violet-600" :
-                        t.category === "Supervision" ? "text-emerald-600" : "text-blue-600"
-                      )} />
+                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0", TONE_TILE[toneOf(t)])}>
+                      <Repeat2 className={cn("w-4 h-4", TONE_TEXT[toneOf(t)])} />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-zinc-900 leading-tight truncate">{t.title}</p>
@@ -155,9 +148,7 @@ export default function TemplatesPage() {
                     <span key={d} className={cn(
                       "text-[10px] font-semibold w-7 h-7 rounded-full flex items-center justify-center",
                       t.days.includes(d)
-                        ? t.category === "Restricted" ? "bg-violet-600 text-white" :
-                          t.category === "Supervision" ? "bg-emerald-600 text-white" :
-                          "bg-blue-600 text-white"
+                        ? TONE_SOLID[toneOf(t)]
                         : "bg-zinc-100 text-zinc-400"
                     )}>
                       {d[0]}
@@ -172,14 +163,7 @@ export default function TemplatesPage() {
                       <Clock className="w-3 h-3" />
                       {formatTime(t.start_time)} – {formatTime(t.end_time)}
                     </div>
-                    <span className={cn(
-                      "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                      t.category === "Restricted" ? "bg-violet-50 text-violet-700" :
-                      t.category === "Supervision" ? "bg-emerald-50 text-emerald-700" :
-                      "bg-blue-50 text-blue-700"
-                    )}>
-                      {t.category}
-                    </span>
+                    <KindBadge a={t} />
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-semibold text-zinc-900">
@@ -200,7 +184,7 @@ export default function TemplatesPage() {
                 {[
                   { label: "Restricted", value: restrictedH, color: "bg-violet-600" },
                   { label: "Unrestricted", value: unrestrictedH, color: "bg-blue-500" },
-                  { label: "Supervision", value: supervisionH, color: "bg-emerald-500" },
+                  { label: "Supervision (incl. above)", value: supervisionH, color: "bg-emerald-500" },
                 ].map((s) => (
                   <div key={s.label}>
                     <div className="flex items-center gap-1.5 mb-1">
@@ -216,9 +200,12 @@ export default function TemplatesPage() {
                   <div className="h-2 bg-zinc-100 rounded-full overflow-hidden flex">
                     <div className="bg-violet-600 h-full transition-all" style={{ width: `${(restrictedH / totalH) * 100}%` }} />
                     <div className="bg-blue-500 h-full transition-all" style={{ width: `${(unrestrictedH / totalH) * 100}%` }} />
-                    <div className="bg-emerald-500 h-full transition-all" style={{ width: `${(supervisionH / totalH) * 100}%` }} />
+                    <div className="bg-amber-400 h-full transition-all" style={{ width: `${(uncategorizedH / totalH) * 100}%` }} />
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1.5">{totalH.toFixed(1)}h projected total per week</p>
+                  <p className="text-xs text-zinc-400 mt-1.5">
+                    {totalH.toFixed(1)}h projected total per week
+                    {uncategorizedH > 0 && ` · ${uncategorizedH.toFixed(1)}h from templates that still need Restricted or Unrestricted`}
+                  </p>
                 </>
               )}
             </div>

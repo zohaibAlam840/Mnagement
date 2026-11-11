@@ -101,7 +101,7 @@ export async function generateMvf(
   const { start, next } = monthRange(yearMonth)
   const [{ data: acts }, { data: trainee }, { data: tp }, { data: sup }, { data: sp }] = await Promise.all([
     db.from("activities")
-      .select("duration_minutes, category, session_type, observation_with_client, observation_duration_minutes")
+      .select("*") // includes activity_type once the Nov 2026 migration has run
       .eq("trainee_id", traineeId).eq("status", "approved").gte("date", start).lt("date", next),
     db.from("profiles").select("first_name, last_name").eq("id", traineeId).single(),
     db.from("trainee_profiles").select("*").eq("id", traineeId).maybeSingle(),

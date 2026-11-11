@@ -5,6 +5,7 @@ import Link from "next/link"
 import { CheckSquare, AlertTriangle, Users, Video, ChevronRight, CheckCircle2, Clock, UserPlus } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { sumHours } from "@/lib/activityKind"
 import type { Database } from "@/lib/supabase/types"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
@@ -80,7 +81,7 @@ export default function SupervisorDashboard() {
         const [p, tp, acts] = await Promise.all([
           supabase.from("profiles").select("*").in("id", allIds),
           supabase.from("trainee_profiles").select("*").in("id", traineeIds),
-          supabase.from("activities").select("trainee_id, category, duration_minutes").in("trainee_id", traineeIds),
+          supabase.from("activities").select("*").in("trainee_id", traineeIds),
         ])
         profiles = p.data ?? []
         traineeProfiles = tp.data ?? []
@@ -99,8 +100,8 @@ export default function SupervisorDashboard() {
         const traineeProfile = traineeProfileMap[rel.trainee_id] ?? null
         const myActs = activities.filter(a => a.trainee_id === rel.trainee_id)
         const totalHours = myActs.reduce((s, a) => s + a.duration_minutes, 0) / 60
-        const restrictedH = myActs.filter(a => a.category === "Restricted").reduce((s, a) => s + a.duration_minutes, 0) / 60
-        const supervisionH = myActs.filter(a => a.category === "Supervision").reduce((s, a) => s + a.duration_minutes, 0) / 60
+        const restrictedH = sumHours(myActs).restricted
+        const supervisionH = sumHours(myActs).supervision
         const restrictedPct = totalHours > 0 ? (restrictedH / totalHours) * 100 : 0
         const supervisionPct = totalHours > 0 ? (supervisionH / totalHours) * 100 : 0
         const minSup = traineeProfile?.fieldwork_type === "concentrated"
