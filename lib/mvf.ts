@@ -1,6 +1,6 @@
 // BACB 2027 Monthly Fieldwork Verification Form (MVF) — values and PDF field map.
 // Client-confirmed mapping (Oct 2026):
-//   Independent Hours  = Unsupervised hours in-app (Restricted + Unrestricted)
+//   Independent Hours  = Unsupervised hours in-app (fieldwork tasks, not supervision)
 //   Supervised Hours   = Supervision activities (individual, group, observation)
 //   Observation        = observation minutes logged with clients
 //   Total / Percent    = in-app monthly total and supervision %

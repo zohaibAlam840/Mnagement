@@ -42,14 +42,15 @@ export default function MonthlyBreakdown({ m, monthLabel, supCls, reqContacts, r
   cap: number
 }) {
   const supervisedH = Math.round((m.individualSupH + m.groupSupH) * 10) / 10
-  const unsupervisedH = Math.round((m.restrictedH + m.unrestrictedH) * 10) / 10
+  // Fieldwork tasks only — Restricted/Unrestricted now also include supervision hours
+  const unsupervisedH = Math.round(Math.max(0, m.totalH - m.supervisionH) * 10) / 10
   return (
     <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
           { label: "Total This Month", value: `${m.totalH}h`, sub: `cap ${cap}h`, color: "text-violet-600", icon: Clock },
           { label: "Supervised Hours", value: `${supervisedH}h`, sub: `ind ${m.individualSupH} · grp ${m.groupSupH}`, color: "text-emerald-600", icon: Users },
-          { label: "Unsupervised Hours", value: `${unsupervisedH}h`, sub: `restricted + unrestricted`, color: "text-blue-600", icon: TrendingUp },
+          { label: "Unsupervised Hours", value: `${unsupervisedH}h`, sub: `fieldwork tasks (not supervision)`, color: "text-blue-600", icon: TrendingUp },
           { label: "Supervision %", value: `${m.supervisionPct}%`, sub: supCls.label, color: supCls.text, icon: CheckCircle2 },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E6F4] p-4">

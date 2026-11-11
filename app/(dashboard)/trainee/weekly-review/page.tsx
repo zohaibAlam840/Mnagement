@@ -444,8 +444,8 @@ export default function WeeklyReviewPage() {
     })
 
     setSubmitting(false)
+    await load() // load() clears the banner, so show it afterwards
     setSubmitSuccess(true)
-    await load()
   }
 
   const weekHours = sumHours(activities)

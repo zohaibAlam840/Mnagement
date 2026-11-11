@@ -317,7 +317,7 @@ function TotalView({ t, targetHours, progressPercent, weightedH, fieldworkType, 
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="font-semibold text-zinc-900 text-sm">Hours This Year</h2>
-              <p className="text-xs text-zinc-400 mt-0.5">Restricted + Unrestricted + Supervision</p>
+              <p className="text-xs text-zinc-400 mt-0.5">All logged fieldwork hours</p>
             </div>
             <span className="text-xs text-zinc-400 font-medium">{currentYear}</span>
           </div>
